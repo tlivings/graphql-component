@@ -1,10 +1,12 @@
-'use strict';
 
-const Gql = require('graphql-tag');
+import gql from 'graphql-tag';
 
-const debug = require('debug')('graphql-component:types');
+import debuglog from 'debug';
+import { IGraphQLComponent } from './interface.types';
 
-const check = function (operation, fieldName, excludes) {
+const debug = debuglog('graphql-component:types');
+
+export const check = function (operation, fieldName, excludes) {
   for (const [root, name] in excludes) {
     if (root === '*') {
       return true;
@@ -13,7 +15,7 @@ const check = function (operation, fieldName, excludes) {
   }
 }
 
-const exclude = function (types, excludes) {
+export const exclude = function (types, excludes) {
   if (!excludes || excludes.length < 1) {
     return types;
   }
@@ -38,10 +40,10 @@ const exclude = function (types, excludes) {
   return types;
 }
 
-const getImportedTypes = function (component, excludes) {
-  const types = component._types.map((type) => Gql`${type}`);
+export const getImportedTypes = function (component: IGraphQLComponent, excludes?: string[]) {
+  const types = component._types.map((type) => gql`${type}`);
   const importedTypes = component._importedTypes;
   return exclude([...types, ...importedTypes], excludes);
 };
 
-module.exports = { exclude, check, getImportedTypes };
+export default { exclude, check, getImportedTypes };
