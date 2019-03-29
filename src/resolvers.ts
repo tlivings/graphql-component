@@ -1,13 +1,10 @@
 
-import GraphQLToolkit from 'graphql-toolkit';
-
 import debuglog from 'debug';
-import { IGraphQLComponent } from './interface.types';
-import { IResolverObject } from 'graphql-tools';
+import { IGraphQLComponent, ResolverFunction } from './interface.types';
+import { IResolvers } from 'graphql-tools';
+import { mergeResolvers } from 'graphql-toolkit';
 
 const debug = debuglog('graphql-component:resolver');
-
-type ResolverFunction = (_: any, args: any, ctx: any, info: any) => any;
 
 export const memoize = function (parentType: string, fieldName: string, resolve: ResolverFunction): ResolverFunction {
   const _cache = new WeakMap();
@@ -40,12 +37,12 @@ export const memoize = function (parentType: string, fieldName: string, resolve:
   };
 };
 
-export const transformResolvers = function (resolvers: IResolverObject, excludes: string[]): IResolverObject {
+export const transformResolvers = function (resolvers: IResolvers, excludes: string[][]): IResolvers {
   let filteredResolvers = Object.assign({}, resolvers);
 
   for (const [root, name] of excludes) {
     if (root === '*') {
-      filteredResolvers = Object.create({});
+      filteredResolvers = {};
       break;
     }
     if (!name || name === '' || name === '*') {
@@ -58,7 +55,7 @@ export const transformResolvers = function (resolvers: IResolverObject, excludes
   return filteredResolvers;
 };
 
-export const wrapResolvers = function (bind: IGraphQLComponent, resolvers: IResolverObject): IResolverObject {
+export const wrapResolvers = function (bind: IGraphQLComponent, resolvers: IResolvers): IResolvers {
   const wrapped = {};
 
   for (const [name, value] of Object.entries(resolvers)) {
@@ -82,10 +79,10 @@ export const wrapResolvers = function (bind: IGraphQLComponent, resolvers: IReso
   return wrapped;
 };
 
-export const getImportedResolvers = function (component: IGraphQLComponent): IResolverObject {
+export const getImportedResolvers = function (component: IGraphQLComponent): IResolvers {
   const importedResolvers = {};
 
-  const allResolvers = GraphQLToolkit.mergeResolvers([component.resolvers, component.importedResolvers]);
+  const allResolvers = mergeResolvers([component.resolvers, component.importedResolvers]);
 
   for (const [parentType, resolvers] of Object.entries(allResolvers)) {
     if (!importedResolvers[parentType]) {

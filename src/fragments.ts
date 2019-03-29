@@ -1,6 +1,6 @@
-import { DocumentNode, ObjectTypeDefinitionNode, DefinitionNode, FieldDefinitionNode } from 'graphql';
+import { DocumentNode, FieldDefinitionNode, DefinitionNode } from 'graphql';
 
-export const iterateObjectTypes = function *(definitions: ReadonlyArray<DefinitionNode>): Iterable<ObjectTypeDefinitionNode> {
+const iterateObjectTypes = function *(definitions: ReadonlyArray<DefinitionNode>): Iterable<any> {
   for (const definition of definitions) {
     if (definition.kind === 'ObjectTypeDefinition' && ['Query', 'Mutation', 'Subscription'].indexOf(definition.name.value) === -1) {
       yield definition;

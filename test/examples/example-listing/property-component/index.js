@@ -1,6 +1,6 @@
 'use strict';
 
-const GraphQLComponent = require('../../../../lib/index');
+const {GraphQLComponent} = require('../../../../dist/index');
 const Resolvers = require('./resolvers');
 const Types = require('./types');
 const Mocks = require('./mocks');
