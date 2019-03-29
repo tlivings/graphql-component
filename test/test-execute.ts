@@ -1,12 +1,11 @@
 'use strict';
 
-const Test = require('tape');
-const Context = require('../lib/context');
-const GraphQLComponent = require('../lib/index');
+import Test from 'tape';
+import { GraphQLComponent } from '../src/index';
 
 Test('test component execute', (t) => {
 
-  const types = `
+  const types = [`
     type Book {
       id: ID!
       title: String
@@ -14,11 +13,11 @@ Test('test component execute', (t) => {
     type Query {
       book(id: ID!) : Book
     }
-  `;
+  `];
 
   const resolvers = {
     Query: {
-      book(_, { id }, context, info) {
+      book() {
         return {
           id: 1,
           title: 'Some Title'

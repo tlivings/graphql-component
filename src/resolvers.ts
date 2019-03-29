@@ -55,7 +55,7 @@ export const transformResolvers = function (resolvers: IResolvers, excludes: str
   return filteredResolvers;
 };
 
-export const wrapResolvers = function (bind: IGraphQLComponent, resolvers: IResolvers): IResolvers {
+export const wrapResolvers = function (bind: object, resolvers: IResolvers): IResolvers {
   const wrapped = {};
 
   for (const [name, value] of Object.entries(resolvers)) {
@@ -90,7 +90,7 @@ export const getImportedResolvers = function (component: IGraphQLComponent): IRe
     }
 
     for (const [name, value] of Object.entries(resolvers)) {
-      importedResolvers[parentType][name] = value.bind(component);
+      importedResolvers[parentType][name] = value;
     }
   }
 

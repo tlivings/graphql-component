@@ -1,15 +1,22 @@
 
-import { GraphQLSchema, Source, DocumentNode } from 'graphql';
+import { GraphQLSchema, Source, DocumentNode, GraphQLResolveInfo } from 'graphql';
 import { IMocks, IResolvers } from 'graphql-tools';
 import { DirectiveUseMap } from 'graphql-toolkit';
 
-export type ContextFunction = ((ctx: object) => object);
-
-export type ComponentContextFunction = ((component: IGraphQLComponent, ctx: object) => object);
+export type ContextFunction = ((ctx: any) => any);
 
 export interface IContextMiddleware {
   name: string
-  fn: ((object) => object)
+  fn: ContextFunction
+}
+
+export interface IContextConfig {
+  namespace: string
+  factory: ContextFunction
+}
+
+export interface IContextWrapper extends ContextFunction {
+  use: (name: string|ContextFunction|null, fn?: ContextFunction|string) => void
 }
 
 export interface IGraphQLComponentConfig {
@@ -18,7 +25,7 @@ export interface IGraphQLComponentConfig {
 }
 
 export interface IGraphQLComponent {
-  execute: (input: string, options: { root: any, context: object, variables: object }) => Promise<any>
+  execute: (input: string, options: { root: any, context: {}, variables: {} }) => Promise<any>
   schema: GraphQLSchema
   types: (string | Source | DocumentNode)[]
   importedTypes: (string | Source | DocumentNode)[]
@@ -29,22 +36,17 @@ export interface IGraphQLComponent {
   mocks: IMocks
 }
 
-export interface IComponentOptions {
-  types: (string | Source | DocumentNode)[]
-  resolvers: IResolvers<any, any>
-  imports: (IGraphQLComponent|IGraphQLComponentConfig)[]
-  mocks: MocksConfigFunction
-  directives: DirectiveUseMap
-  context: IContextConfig
-  useMocks: boolean
-  preserveTypeResolvers: boolean
+export interface IGraphQLComponentOptions {
+  types?: (string | Source | DocumentNode)[]
+  resolvers?: IResolvers<any, any>
+  imports?: (IGraphQLComponent|IGraphQLComponentConfig)[]
+  mocks?: MocksConfigFunction
+  directives?: DirectiveUseMap
+  context?: IContextConfig
+  useMocks?: boolean
+  preserveTypeResolvers?: boolean
 };
-
-export interface IContextConfig {
-  namespace: string
-  factory: ComponentContextFunction
-}
 
 export type MocksConfigFunction = (IMocks) => IMocks;
 
-export type ResolverFunction = (_: any, args: any, ctx: any, info: any) => any;
+export type ResolverFunction = (_: any, args: any, ctx: any, info: GraphQLResolveInfo) => any;

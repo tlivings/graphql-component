@@ -4,7 +4,7 @@ import { GraphQLSchema, Source, DocumentNode, execute } from 'graphql';
 import gql from 'graphql-tag';
 import { IMocks, IResolvers, IMockOptions, makeExecutableSchema, addMockFunctionsToSchema } from 'graphql-tools';
 import { mergeResolvers, DirectiveUseMap, mergeTypeDefs } from 'graphql-toolkit';
-import { IGraphQLComponent, IComponentOptions, ContextFunction, IGraphQLComponentConfig } from './interfaces';
+import { IGraphQLComponent, IGraphQLComponentOptions, ContextFunction, IGraphQLComponentConfig } from './interfaces';
 import { getImportedResolvers, transformResolvers, wrapResolvers } from './resolvers';
 import { contextBuilder, createContext } from './context';
 import { getImportedTypes } from './types';
@@ -33,12 +33,12 @@ export class GraphQLComponent implements IGraphQLComponent {
     types = [],
     resolvers = {},
     imports = [],
-    mocks,
-    directives,
-    context,
-    useMocks,
-    preserveTypeResolvers
-  }: IComponentOptions) {
+    mocks = undefined,
+    directives = undefined,
+    context = undefined,
+    useMocks = false,
+    preserveTypeResolvers = false
+  }: IGraphQLComponentOptions) {
     debug(`creating component`);
 
     this._schema = undefined;
@@ -88,7 +88,7 @@ export class GraphQLComponent implements IGraphQLComponent {
 
     this._useMocks = useMocks;
     this._importedMocks = Object.assign({}, ...this._imports.map((c) => c.mocks));
-    this._mocks = mocks(this._importedMocks);
+    this._mocks = mocks && mocks(this._importedMocks);
     this._preserveTypeResolvers = preserveTypeResolvers;
 
     this._mergedTypes = mergeTypeDefs([...this._types, ...this._importedTypes]);
@@ -97,7 +97,7 @@ export class GraphQLComponent implements IGraphQLComponent {
     this._fragments = buildFragments(this._mergedTypes);
   }
 
-  static isComponent(component) {
+  static isComponent(component: any): boolean {
     return !!(component.execute && component.types && component.resolvers && component.context);
   }
 
