@@ -38,5 +38,3 @@ export const buildFragments = function (document: DocumentNode) {
 
   return fragments;
 };
-
-export default { buildFragments };

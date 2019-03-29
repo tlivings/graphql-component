@@ -1,15 +1,14 @@
 
+import debuglog from 'debug';
 import { GraphQLSchema, Source, DocumentNode, execute } from 'graphql';
-import Gql from 'graphql-tag';
+import gql from 'graphql-tag';
 import { IMocks, IResolvers, IMockOptions, makeExecutableSchema, addMockFunctionsToSchema } from 'graphql-tools';
 import { mergeResolvers, DirectiveUseMap, mergeTypeDefs } from 'graphql-toolkit';
-import Resolvers from './resolvers';
-import Context from './context';
-import Types from './types';
-import Fragments from './fragments';
-import { IGraphQLComponent, IComponentOptions, ContextFunction, IGraphQLComponentConfig } from './interface.types';
-
-import debuglog from 'debug';
+import { IGraphQLComponent, IComponentOptions, ContextFunction, IGraphQLComponentConfig } from './interfaces';
+import { getImportedResolvers, transformResolvers, wrapResolvers } from './resolvers';
+import { contextBuilder, createContext } from './context';
+import { getImportedTypes } from './types';
+import { buildFragments } from './fragments';
 
 const debug = debuglog('graphql-component:schema');
 
@@ -46,13 +45,13 @@ export class GraphQLComponent implements IGraphQLComponent {
 
     this._types = Array.isArray(types) ? types : [types];
 
-    this._resolvers = Resolvers.wrapResolvers(this, resolvers);
+    this._resolvers = wrapResolvers(this, resolvers);
 
     this._imports = [];
 
     this._directives = directives;
 
-    this._context = Context.builder(this, context);
+    this._context = contextBuilder(this, context);
 
     const importedTypes = [];
     const importedResolvers = [];
@@ -60,28 +59,28 @@ export class GraphQLComponent implements IGraphQLComponent {
     for (const imp of imports) {
       if (GraphQLComponent.isComponent(imp)) {
         const component = <IGraphQLComponent>imp;
-        importedTypes.push(...Types.getImportedTypes(component));
-        importedResolvers.push(Resolvers.getImportedResolvers(component));
+        importedTypes.push(...getImportedTypes(component));
+        importedResolvers.push(getImportedResolvers(component));
         this._imports.push(component);
         continue;
       }
 
-      const config = <IGraphQLComponentConfig>imp;
+      const { component, exclude } = <IGraphQLComponentConfig>imp;
 
-      if (!config.exclude || !config.exclude.length) {
-        importedTypes.push(...Types.getImportedTypes(config.component));
-        importedResolvers.push(Resolvers.getImportedResolvers(config.component));
+      if (!exclude || !exclude.length) {
+        importedTypes.push(...getImportedTypes(component));
+        importedResolvers.push(getImportedResolvers(component));
       }
       else {
-        const excludes = config.exclude.map((filter) => {
+        const excludes = exclude.map((filter) => {
           return filter.split('.');
         });
 
-        importedTypes.push(...Types.getImportedTypes(config.component, excludes));
-        importedResolvers.push(Resolvers.transformResolvers(Resolvers.getImportedResolvers(config.component), excludes));
+        importedTypes.push(...getImportedTypes(component, excludes));
+        importedResolvers.push(transformResolvers(getImportedResolvers(component), excludes));
       }
 
-      this._imports.push(config.component);
+      this._imports.push(component);
     }
 
     this._importedTypes = importedTypes;
@@ -95,15 +94,15 @@ export class GraphQLComponent implements IGraphQLComponent {
     this._mergedTypes = mergeTypeDefs([...this._types, ...this._importedTypes]);
     this._mergedResolvers = mergeResolvers([this._resolvers, this._importedResolvers]);
 
-    this._fragments = Fragments.buildFragments(this._mergedTypes);
+    this._fragments = buildFragments(this._mergedTypes);
   }
 
   static isComponent(component) {
     return !!(component.execute && component.types && component.resolvers && component.context);
   }
 
-  async execute(input, { root = undefined, context = {}, variables = {} } = {}) : Promise<any> {
-    return await execute({ schema: this.schema, document: Gql`${this._fragments.join('\n')}\n${input}`, rootValue: root, contextValue: context, variableValues: variables });
+  async execute(input: string, { root = undefined, context = {}, variables = {} } = {}) : Promise<any> {
+    return await execute({ schema: this.schema, document: gql`${this._fragments.join('\n')}\n${input}`, rootValue: root, contextValue: context, variableValues: variables });
   }
 
   get schema() {
@@ -126,7 +125,7 @@ export class GraphQLComponent implements IGraphQLComponent {
     if (this._useMocks) {
       debug(`adding mocks, preserveTypeResolvers=${this._preserveTypeResolvers}`);
 
-      const mocks: IMocks = Object.assign({}, this._importedMocks, this._mocks);
+      const mocks = Object.assign({}, this._importedMocks, this._mocks);
 
       addMockFunctionsToSchema(<IMockOptions>{ schema, mocks, preserveTypeResolvers: this._preserveTypeResolvers });
     }
@@ -137,7 +136,7 @@ export class GraphQLComponent implements IGraphQLComponent {
   }
 
   get context() {
-    return Context.create(this._context.bind(this));
+    return createContext(this._context.bind(this));
   }
 
   get types() {

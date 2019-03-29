@@ -2,7 +2,7 @@
 import gql from 'graphql-tag';
 
 import debuglog from 'debug';
-import { IGraphQLComponent } from './interface.types';
+import { IGraphQLComponent } from './interfaces';
 import { DocumentNode, DefinitionNode } from 'graphql';
 
 const debug = debuglog('graphql-component:types');
@@ -51,5 +51,3 @@ export const getImportedTypes = function (component: IGraphQLComponent, excludes
   const importedTypes = component.importedTypes;
   return exclude([...types, ...importedTypes], excludes);
 };
-
-export default { exclude, check, getImportedTypes };

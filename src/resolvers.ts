@@ -1,6 +1,6 @@
 
 import debuglog from 'debug';
-import { IGraphQLComponent, ResolverFunction } from './interface.types';
+import { IGraphQLComponent, ResolverFunction } from './interfaces';
 import { IResolvers } from 'graphql-tools';
 import { mergeResolvers } from 'graphql-toolkit';
 
@@ -95,11 +95,4 @@ export const getImportedResolvers = function (component: IGraphQLComponent): IRe
   }
 
   return importedResolvers;
-};
-
-export default {
-  memoize,
-  transformResolvers,
-  wrapResolvers,
-  getImportedResolvers
 };

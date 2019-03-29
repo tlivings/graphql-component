@@ -1,10 +1,10 @@
 
 import debuglog from 'debug';
-import { IGraphQLComponent, IContextConfig, ContextFunction, IContextMiddleware } from './interface.types';
+import { IGraphQLComponent, IContextConfig, ContextFunction, IContextMiddleware } from './interfaces';
 
 const debug = debuglog('graphql-component:context');
 
-export const builder = function (component: IGraphQLComponent, ctxConfig?: IContextConfig): ContextFunction {
+export const contextBuilder = function (component: IGraphQLComponent, ctxConfig?: IContextConfig): ContextFunction {
   return async function (arg): Promise<object> {
     const ctx = {};
 
@@ -26,10 +26,10 @@ export const builder = function (component: IGraphQLComponent, ctxConfig?: ICont
   };
 };
 
-export const create = function (context: ContextFunction): (object) => Promise<object> {
+export const createContext = function (context: ContextFunction): (object) => Promise<object> {
   const middleware: IContextMiddleware[] = [];
 
-  const createContext = async (arg): Promise<object> => {
+  const creator = async (arg): Promise<object> => {
     debug('building root context');
 
     for (let { name, fn } of middleware) {
@@ -45,7 +45,7 @@ export const create = function (context: ContextFunction): (object) => Promise<o
     };
   };
 
-  createContext.use = (name: string, fn: (object) => object): void => {
+  creator.use = (name: string, fn: (object) => object): void => {
     if (typeof name === 'function') {
       fn = name;
       name = 'unknown';
@@ -54,7 +54,5 @@ export const create = function (context: ContextFunction): (object) => Promise<o
     middleware.push({ name, fn });
   };
 
-  return createContext;
+  return creator;
 };
-
-export default { builder, create };
