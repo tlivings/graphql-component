@@ -1,9 +1,8 @@
 'use strict';
 
 import Test from 'tape';
-import { wrapResolvers, getImportedResolvers, memoize } from '../src/resolvers';
-import { GraphQLComponent } from '../src';
-import { IGraphQLComponent } from '../src/interfaces';
+import { wrapResolvers, getImportedResolvers, memoize } from '../src/util/resolvers';
+import { IGraphQLComponent } from '../src/typedefs';
 
 Test('wrapping', (t) => {
 
@@ -80,7 +79,7 @@ Test('imports', (t) => {
       }
     };
 
-    const imported = <any>getImportedResolvers(<IGraphQLComponent><any>imp);
+    const imported = <any>getImportedResolvers(<any>imp);
 
     t.ok(imported.Query.test, 'resolver present');
     t.ok(imported.Query.imported, 'transitive resolver present');

@@ -1,6 +1,6 @@
 
 import debuglog from 'debug';
-import { IGraphQLComponent, IContextConfig, ContextFunction, IContextMiddleware, IContextWrapper } from './interfaces';
+import { IGraphQLComponent, IContextConfig, ContextFunction, IContextMiddleware, IContextWrapper } from '../typedefs';
 
 const debug = debuglog('graphql-component:context');
 

@@ -4,11 +4,11 @@ import { GraphQLSchema, Source, DocumentNode, execute } from 'graphql';
 import gql from 'graphql-tag';
 import { IMocks, IResolvers, IMockOptions, makeExecutableSchema, addMockFunctionsToSchema } from 'graphql-tools';
 import { mergeResolvers, DirectiveUseMap, mergeTypeDefs } from 'graphql-toolkit';
-import { IGraphQLComponent, IGraphQLComponentOptions, ContextFunction, IGraphQLComponentConfig } from './interfaces';
-import { getImportedResolvers, transformResolvers, wrapResolvers } from './resolvers';
-import { contextBuilder, createContext } from './context';
-import { getImportedTypes } from './types';
-import { buildFragments } from './fragments';
+import { IGraphQLComponent, IGraphQLComponentOptions, ContextFunction, IGraphQLComponentConfig } from './typedefs';
+import { getImportedResolvers, transformResolvers, wrapResolvers } from './util/resolvers';
+import { contextBuilder, createContext } from './util/context';
+import { getImportedTypes } from './util/types';
+import { buildFragments } from './util/fragments';
 
 const debug = debuglog('graphql-component:schema');
 

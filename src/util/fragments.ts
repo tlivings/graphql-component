@@ -1,3 +1,4 @@
+
 import { DocumentNode, FieldDefinitionNode, DefinitionNode } from 'graphql';
 
 const iterateObjectTypes = function *(definitions: ReadonlyArray<DefinitionNode>): Iterable<any> {

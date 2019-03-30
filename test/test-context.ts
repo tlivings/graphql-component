@@ -1,7 +1,7 @@
 'use strict';
 
 import Test from 'tape';
-import { contextBuilder, createContext } from '../src/context';
+import { contextBuilder, createContext } from '../src/util/context';
 import { GraphQLComponent } from '../src/index';
 
 Test('context builder', async (t) => {

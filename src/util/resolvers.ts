@@ -1,6 +1,6 @@
 
 import debuglog from 'debug';
-import { IGraphQLComponent, ResolverFunction } from './interfaces';
+import { IGraphQLComponent, ResolverFunction } from '../typedefs';
 import { IResolvers } from 'graphql-tools';
 import { mergeResolvers } from 'graphql-toolkit';
 

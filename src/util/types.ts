@@ -1,8 +1,7 @@
 
 import gql from 'graphql-tag';
-
 import debuglog from 'debug';
-import { IGraphQLComponent } from './interfaces';
+import { IGraphQLComponent } from '../typedefs';
 import { DocumentNode, DefinitionNode } from 'graphql';
 
 const debug = debuglog('graphql-component:types');
