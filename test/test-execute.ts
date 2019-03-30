@@ -1,7 +1,7 @@
 'use strict';
 
 import Test from 'tape';
-import { GraphQLComponent } from '../src/index';
+import GraphQLComponent from '../src/index';
 
 Test('test component execute', (t) => {
 

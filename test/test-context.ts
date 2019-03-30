@@ -2,7 +2,7 @@
 
 import Test from 'tape';
 import { contextBuilder, createContext } from '../src/util/context';
-import { GraphQLComponent } from '../src/index';
+import GraphQLComponent from '../src/index';
 
 Test('context builder', async (t) => {
   t.plan(3);

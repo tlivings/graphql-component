@@ -12,7 +12,7 @@ import { buildFragments } from './util/fragments';
 
 const debug = debuglog('graphql-component:schema');
 
-export class GraphQLComponent implements IGraphQLComponent {
+export = class GraphQLComponent implements IGraphQLComponent {
   _schema: GraphQLSchema
   _types: (string | Source | DocumentNode)[]
   _resolvers

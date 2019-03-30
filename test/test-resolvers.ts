@@ -2,7 +2,6 @@
 
 import Test from 'tape';
 import { wrapResolvers, getImportedResolvers, memoize } from '../src/util/resolvers';
-import { IGraphQLComponent } from '../src/typedefs';
 
 Test('wrapping', (t) => {
 
