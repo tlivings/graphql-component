@@ -1,3 +1,10 @@
+### UNRELEASED
+
+- Refactor how imports are merged together to be optimized and only run when a schema is requested
+- [BREAKING] removed fragment helpers
+- [BREAKING] `schemaDirectives` (which returned merged directives) removed from component api
+- [BREAKING] removed `proxyImportedResolvers` feature flag
+- Moved tests alongside source code
 
 ### v1.3.0 
 
