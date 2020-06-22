@@ -24,8 +24,6 @@
     "@apollo/federation": "^0.10.3",
     "cuid": "^2.1.8",
     "debug": "^4.1.1",
-    "graphql-tag": "^2.10.3",
-    "graphql-tag-pluck": "^0.8.7",
     "graphql-tools": "^6.0.10",
     "lodash.set": "^4.3.2"
   },
@@ -38,6 +36,7 @@
     "casual": "^1.6.0",
     "eslint": "^6.5.1",
     "graphql": "^14",
+    "graphql-tag": "^2.10.3",
     "nyc": "^14.1.1",
     "tape": "^4.9.1"
   }
