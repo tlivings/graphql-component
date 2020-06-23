@@ -37,17 +37,18 @@ To intercept resolvers with mocks execute this app with `GRAPHQL_MOCK=1` enabled
   - `context` - an optional object { namespace, factory } for contributing to context.
   - `directives` - an optional object containing custom schema directives.
   - `useMocks` - enable mocks.
-  - `preserveMockResolvers` - preserve type resolvers in mock mode.
+  - `preserveResolvers` - preserve type resolvers in mock mode.
   - `mocks` - an optional object containing mock types.
   - `dataSources` - an array of data sources instances to make available on `context.dataSources` .
   - `dataSourceOverrides` - overrides for data sources in the component tree.
   - `federation` - enable building a federated schema (default: `false`).
+  
 - `GraphQLComponent.delegateToComponent(component, options)` - helper for delegating a sub-query to another component
   - `component` - the component to delegate to.
   - `options` - additional options:
     - `subPath` - optional subPath to extract sub-query from
     - `contextValue` - the context (required).
-    - `info` - the info object (required).
+    - `info` - the info object from the calling resolver (required).
 
 A new GraphQLComponent instance has the following API:
 
@@ -55,7 +56,7 @@ A new GraphQLComponent instance has the following API:
 - `context` - context function that build context for all components in the tree.
 - `types` - this component's types.
 - `resolvers` - this component's resolvers.
-- `imports` - this component's imported components or a import configuration.
+- `imports` - this component's imported components or imported component configuration objects.
 - `mocks` - custom mocks for this component.
 - `directives` - this component's directives.
 - `dataSources` - this component's data source(s), if any.
@@ -89,11 +90,11 @@ class PropertyComponent extends GraphQLComponent {
 module.exports = PropertyComponent;
 ```
 
-This will allow for configuration (in this example, `useMocks` and `preserveResolvers`) as well as instance data per component (such as data base clients, etc).
+This will allow for configuration (in this example, `useMocks` and `preserveResolvers`) as well as instance data per component (such as data source clients, etc).
 
-### Aggregation
+### Aggregation/Composition
 
-Example to merge multiple components:
+Example to merge multiple components or compose a component of other components:
 
 ```javascript
 const { schema, context } = new GraphQLComponent({
