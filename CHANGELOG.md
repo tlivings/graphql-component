@@ -1,5 +1,7 @@
 ### v6.0.2
 
+- [FIX] DataSources are now available in middleware context, enabling middleware to access component dataSources for authentication and other operations
+- [TESTS] Added test to verify dataSources availability in middleware
 - [PERFORMANCE] Enhanced context building with parallel import processing, and middleware optimization
 - [TESTS] Added comprehensive performance regression tests to validate optimization correctness and prevent breaking changes
 

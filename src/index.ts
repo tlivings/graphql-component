@@ -184,8 +184,13 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     this._context = async (globalContext: Record<string, unknown>): Promise<TContextType> => {
       //BREAKING: The context injected into data sources won't have data sources on it
       const ctx = {
-        dataSources: this._dataSourceContextInject(globalContext)
+        dataSources: globalContext.dataSources || {}
       };
+
+      // Add this component's dataSources if not already present or if empty
+      if (!globalContext.dataSources || Object.keys(globalContext.dataSources).length === 0) {
+        Object.assign(ctx.dataSources, this._dataSourceContextInject(globalContext));
+      }
 
       // Only process imports if they exist
       if (this._imports.length > 0) {
@@ -228,7 +233,25 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     const contextFn = async (context: Record<string, unknown>): Promise<ComponentContext> => {
       debug(`building root context`);
       
-      let processedContext = context;
+      // Inject dataSources early so middleware can access them
+      const dataSources = this._dataSourceContextInject(context);
+      
+      // Also gather data sources from imported components for middleware
+      const importedDataSources = {};
+      if (this._imports.length > 0) {
+        for (const { component } of this._imports) {
+          // Use the public dataSources getter and manually inject them
+          const componentDataSourcesArray = component.dataSources;
+          const componentDataSourceOverrides = component.dataSourceOverrides;
+          const componentInjector = createDataSourceContextInjector(componentDataSourcesArray, componentDataSourceOverrides);
+          const componentDataSources = componentInjector(context);
+          Object.assign(importedDataSources, componentDataSources);
+        }
+      }
+      
+      // Combine all data sources for middleware
+      const allDataSources = Object.assign({}, dataSources, importedDataSources);
+      let processedContext = Object.assign({}, context, { dataSources: allDataSources });
       
       // Apply middleware more efficiently
       if (this._middleware.length > 0) {
@@ -257,8 +280,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
     return contextFn;
   }
-
-
 
   get name(): string {
     return this.constructor.name;
