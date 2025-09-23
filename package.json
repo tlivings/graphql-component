@@ -14,8 +14,8 @@
     "build": "tsc",
     "prepublish": "npm run build",
     "test": "tape -r ts-node/register \"test/**/*.ts\"",
-    "start-composition": "DEBUG=graphql-component ts-node examples/composition/server/index.ts",
-    "start-federation": "DEBUG=graphql-component ts-node examples/federation/run-federation-example.ts",
+    "start-composition": "ts-node examples/composition/server/index.ts",
+    "start-federation": "ts-node examples/federation/run-federation-example.ts",
     "lint": "npx eslint src/index.ts",
     "cover": "nyc npm test",
     "update-deps": "ncu -u && npm install",
@@ -33,8 +33,7 @@
     "@graphql-tools/mock": "^9.0.6",
     "@graphql-tools/schema": "^10.0.8",
     "@graphql-tools/stitch": "^9.4.0",
-    "@graphql-tools/utils": "^10.5.6",
-    "debug": "^4.3.7"
+    "@graphql-tools/utils": "^10.5.6"
   },
   "peerDependencies": {
     "graphql": "^16.0.0"

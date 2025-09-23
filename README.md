@@ -265,13 +265,6 @@ Both examples are accessible at `http://localhost:4000/graphql` when running.
 
 You can find the complete example code in the [`examples/`](./examples/) directory.
 
-## Debugging
-
-Enable debug logging with:
-```bash
-DEBUG=graphql-component:* node your-app.js
-```
-
 ## Repository Structure
 
 - `src/` - Core library code

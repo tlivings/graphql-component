@@ -1,4 +1,3 @@
-import debugConfig from 'debug';
 import { buildFederatedSchema } from '@apollo/federation';
 import { GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema } from 'graphql';
 
@@ -15,8 +14,6 @@ import { makeExecutableSchema } from '@graphql-tools/schema';
 import { stitchSchemas } from '@graphql-tools/stitch';
 import { addMocksToSchema, IMocks } from '@graphql-tools/mock';
 import { SubschemaConfig } from '@graphql-tools/delegate';
-
-const debug = debugConfig('graphql-component');
 
 export type ResolverFunction = (_: any, args: any, ctx: any, info: GraphQLResolveInfo) => any;
 
@@ -211,7 +208,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       // Handle namespace context if present
       if (context) {
-        debug(`building ${context.namespace} context`);
 
         if (!ctx[context.namespace]) {
           ctx[context.namespace] = {};
@@ -231,7 +227,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
   get context(): IContextWrapper {
     // Cache middleware array to avoid recreation
     const contextFn = async (context: Record<string, unknown>): Promise<ComponentContext> => {
-      debug(`building root context`);
       
       // Inject dataSources early so middleware can access them
       const dataSources = this._dataSourceContextInject(context);
@@ -255,9 +250,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       
       // Apply middleware more efficiently
       if (this._middleware.length > 0) {
-        for (const { name, fn } of this._middleware) {
-          debug(`applying ${name} middleware`);
-          processedContext = await fn(processedContext);
+        for (const mw of this._middleware) {
+          processedContext = await mw.fn(processedContext);
         }
       }
 
@@ -272,7 +266,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         fn = name;
         name = 'unknown';
       }
-      debug(`adding ${name} middleware`);
+
       this._middleware.push({ name: name as string, fn: fn! });
 
       return contextFn;
@@ -333,27 +327,22 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       }
 
       if (this._mocks !== undefined && typeof this._mocks === 'boolean' && this._mocks === true) {
-        debug(`adding default mocks to the schema for ${this.name}`);
         // if mocks are a boolean support simply applying default mocks
         this._schema = addMocksToSchema({ schema: this._schema, preserveResolvers: true });
       }
       else if (this._mocks !== undefined && typeof this._mocks === 'object') {
-        debug(`adding custom mocks to the schema for ${this.name}`);
         // else if mocks is an object, that means the user provided
         // custom mocks, with which we pass them to addMocksToSchema so they are applied
         this._schema = addMocksToSchema({ schema: this._schema, mocks: this._mocks, preserveResolvers: true });
       }
 
       if (this._pruneSchema) {
-        debug(`pruning the schema for ${this.name}`);
         this._schema = pruneSchema(this._schema, this._pruneSchemaOptions);
       }
 
-      debug(`created schema for ${this.name}`);
-
       return this._schema;
-    } catch (error) {
-      debug(`Error creating schema for ${this.name}: ${error}`);
+    } 
+    catch (error) {
       throw new Error(`Failed to create schema for component ${this.name}: ${error.message}`);
     }
   }
@@ -450,7 +439,6 @@ module.exports = GraphQLComponent;
  */
 const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceOverrides: IDataSource[]): DataSourceInjectionFunction => {
   const intercept = (instance: IDataSource, context: any) => {
-    debug(`intercepting ${instance.constructor.name}`);
 
     return new Proxy(instance, {
       get(target, key) {
@@ -502,12 +490,9 @@ const memoize = function (parentType: string, fieldName: string, resolve: Resolv
     const path = info && info.path && info.path.key;
     const key = `${path}_${JSON.stringify(args)}`;
 
-    debug(`executing ${parentType}.${fieldName}`);
-
     let cached = _cache.get(context);
 
     if (cached && cached[key]) {
-      debug(`return cached result of memoized ${parentType}.${fieldName}`);
       return cached[key];
     }
 
@@ -520,8 +505,6 @@ const memoize = function (parentType: string, fieldName: string, resolve: Resolv
     cached[key] = result;
 
     _cache.set(context, cached);
-
-    debug(`cached ${parentType}.${fieldName}`);
 
     return result;
   };
@@ -541,7 +524,6 @@ const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IReso
   for (const [type, fields] of Object.entries(resolvers)) {
     // dont bind an object that is an instance of a graphql scalar
     if (fields instanceof GraphQLScalarType) {
-      debug(`not binding ${type}'s fields since ${type}'s fields are an instance of GraphQLScalarType`)
       boundResolvers[type] = fields;
       continue;
     }
@@ -552,17 +534,14 @@ const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IReso
 
     for (const [field, resolver] of Object.entries(fields)) {
       if (['Query', 'Mutation'].indexOf(type) > -1) {
-        debug(`memoized ${type}.${field}`);
         boundResolvers[type][field] = memoize(type, field, resolver.bind(bindContext));
       }
       else {
         // only bind resolvers that are functions
         if (typeof resolver === 'function') {
-          debug(`binding ${type}.${field}`);
           boundResolvers[type][field] = resolver.bind(bindContext);
         }
         else {
-          debug(`not binding ${type}.${field} since ${field} is not mapped to a function`);
           boundResolvers[type][field] = resolver;
         }
       }

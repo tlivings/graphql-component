@@ -4,6 +4,7 @@
 - [TESTS] Added test to verify dataSources availability in middleware
 - [PERFORMANCE] Enhanced context building with parallel import processing, and middleware optimization
 - [TESTS] Added comprehensive performance regression tests to validate optimization correctness and prevent breaking changes
+- [SECURITY] Removed `debug`
 
 ### v6.0.1
 
