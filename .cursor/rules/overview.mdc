@@ -48,7 +48,6 @@ The library supports both traditional schema stitching for monolithic applicatio
 - **tape** - Testing framework for unit tests
 - **eslint** - Code linting with TypeScript support
 - **prettier** - Code formatting
-- **debug** - Runtime debugging utilities
 - **ts-node** - TypeScript execution for examples and development
 
 ## Example Dependencies
