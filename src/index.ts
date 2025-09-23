@@ -250,8 +250,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       
       // Apply middleware more efficiently
       if (this._middleware.length > 0) {
-        for (const { name, fn } of this._middleware) {
-          processedContext = await fn(processedContext);
+        for (const mw of this._middleware) {
+          processedContext = await mw.fn(processedContext);
         }
       }
 
