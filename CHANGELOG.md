@@ -1,9 +1,21 @@
+### v6.0.2
+
+- [FIX] DataSources are now available in middleware context, enabling middleware to access component dataSources for authentication and other operations
+- [TESTS] Added test to verify dataSources availability in middleware
+- [PERFORMANCE] Enhanced context building with parallel import processing, and middleware optimization
+- [TESTS] Added comprehensive performance regression tests to validate optimization correctness and prevent breaking changes
+
+### v6.0.1
+
+- Re-release after merge
+
 ### v6.0.0
 
 - Converted to TS
 - BREAKING removed `delegateToComponent`
 - BREAKING excludes removed as an option in import configuration. Transforms used instead as part of a `SubschemaConfig`.
 - BREAKING upgraded to graphql 16.9+ peer
+- BREAKING datasource injected context does not contain `datasources`
 
 ===
 
