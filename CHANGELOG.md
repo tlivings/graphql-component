@@ -1,3 +1,9 @@
+### v6.0.3
+
+- [FIX] Import handling now supports both `GraphQLComponent` instances and custom `IGraphQLComponent` implementations, not just class instances
+- [FIX] Changed import normalization from `instanceof GraphQLComponent` check to property-based detection, ensuring all components are properly wrapped
+- [TESTS] Added comprehensive tests validating import handling for `GraphQLComponent` instances, `IGraphQLComponent` implementations, and mixed import scenarios
+
 ### v6.0.2
 
 - [FIX] DataSources are now available in middleware context, enabling middleware to access component dataSources for authentication and other operations
