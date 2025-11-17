@@ -162,20 +162,26 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
     this._pruneSchemaOptions = pruneSchemaOptions;
 
-    this._imports = imports && imports.length > 0 ? imports.map((i: GraphQLComponent | IGraphQLComponentConfigObject) => {
-      if (i instanceof GraphQLComponent) {
-        if (this._federation === true) {
-          i.federation = true;
-        }
-        return { component: i };
+    this._imports = imports && imports.length > 0 ? imports.map((i: IGraphQLComponent | IGraphQLComponentConfigObject) => {
+      if (!i) {
+        throw new Error('Import cannot be undefined or null');
       }
-      else {
+      
+      // Check if it's already a config object (has 'component' property)
+      if ('component' in i && i.component) {
         const importConfiguration = i as IGraphQLComponentConfigObject;
         if (this._federation === true) {
           importConfiguration.component.federation = true;
         }
         return importConfiguration;
       }
+      
+      // Otherwise, treat it as an IGraphQLComponent and wrap it
+      const component = i as IGraphQLComponent;
+      if (this._federation === true) {
+        component.federation = true;
+      }
+      return { component };
     }) : [];
 
     this._context = async (globalContext: Record<string, unknown>): Promise<TContextType> => {
