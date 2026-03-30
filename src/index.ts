@@ -173,10 +173,17 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       // Check if it's already a config object (has 'component' property)
       if ('component' in i && i.component) {
+        const comp = (i as IGraphQLComponentConfigObject).component;
+        if (comp === (this as unknown as IGraphQLComponent)) {
+          throw new Error(`Circular import detected: component "${this.name}" imports itself`);
+        }
         return i as IGraphQLComponentConfigObject;
       }
 
       // Otherwise, treat it as an IGraphQLComponent and wrap it
+      if ((i as IGraphQLComponent) === (this as unknown as IGraphQLComponent)) {
+        throw new Error(`Circular import detected: component "${this.name}" imports itself`);
+      }
       return { component: i as IGraphQLComponent };
     }) : [];
 
@@ -206,7 +213,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     // Cache injectors for imported components so they aren't recreated per request
     if (!this._importInjectors && this._imports.length > 0) {
       this._importInjectors = this._imports.map(({ component }) =>
-        createDataSourceContextInjector(component.dataSources, component.dataSourceOverrides)
+        createDataSourceContextInjector(component.dataSources || [], component.dataSourceOverrides || [])
       );
     }
     const importInjectors = this._importInjectors;
@@ -214,6 +221,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     const warnedCollisions = new Set<string>();
 
     const contextFn = async (incomingContext: Record<string, unknown>): Promise<ComponentContext> => {
+      this._assertNotDisposed();
       // 1. Inject this component's data sources
       const dataSources = this._dataSourceContextInject(incomingContext);
 
@@ -234,7 +242,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       // 3. Build context with all data sources and run middleware
       let ctx: Record<string, unknown> = Object.assign({}, incomingContext, { dataSources });
 
-      for (const mw of this._middleware) {
+      const middleware = [...this._middleware];
+      for (const mw of middleware) {
         ctx = await mw.fn(ctx);
       }
 
@@ -380,6 +389,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
   set federation(flag) {
     this._federation = flag;
+    this.invalidateSchema();
   }
 
   get federation(): boolean {
@@ -420,7 +430,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
             let result;
             for (const mapper of functions[key]) {
               result = mapper(...args);
-              if (!result) {
+              if (result === undefined) {
                 break;
               }
             }
@@ -453,6 +463,9 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     if (options.context) {
       if (!options.context.namespace || typeof options.context.namespace !== 'string') {
         throw new Error('context.namespace must be a non-empty string');
+      }
+      if (options.context.namespace === 'dataSources') {
+        throw new Error('context.namespace cannot be "dataSources" as it would shadow the data source map');
       }
       if (typeof options.context.factory !== 'function') {
         throw new Error('context.factory must be a function');
@@ -506,12 +519,12 @@ const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceO
 
     // Inject data sources
     for (const dataSource of dataSources) {
-      proxiedDataSources[dataSource.name || dataSource.constructor.name] = intercept(dataSource, context);
+      proxiedDataSources[dataSource.name != null && dataSource.name !== '' ? dataSource.name : dataSource.constructor.name] = intercept(dataSource, context);
     }
 
     // Override data sources
     for (const dataSourceOverride of dataSourceOverrides) {
-      proxiedDataSources[dataSourceOverride.name || dataSourceOverride.constructor.name] = intercept(dataSourceOverride, context);
+      proxiedDataSources[dataSourceOverride.name != null && dataSourceOverride.name !== '' ? dataSourceOverride.name : dataSourceOverride.constructor.name] = intercept(dataSourceOverride, context);
     }
 
     return proxiedDataSources;
@@ -535,7 +548,21 @@ const stableStringify = function (args: Record<string, unknown>): string {
   const keys = Object.keys(args);
   if (keys.length === 0) return '{}';
   keys.sort();
-  return keys.map(k => `${k}:${typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]}`).join(',');
+  return keys.map(k => {
+    let v: string;
+    if (typeof args[k] === 'object') {
+      try {
+        v = JSON.stringify(args[k]);
+      }
+      catch {
+        v = '[circular]';
+      }
+    }
+    else {
+      v = String(args[k]);
+    }
+    return `${k}:${v}`;
+  }).join(',');
 };
 
 const memoize = function (parentType: string, fieldName: string, resolve: ResolverFunction): ResolverFunction {
