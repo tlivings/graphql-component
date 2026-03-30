@@ -24,7 +24,6 @@ Authoritative instructions for AI agents working in this repository. Use as guid
 - **Test framework**: Tape (TAP output) with Sinon for spies/mocks
 - **Coverage**: NYC
 - **Linting**: ESLint with @typescript-eslint
-- **Formatting**: Prettier (single quotes, 120 line width)
 
 ---
 
@@ -36,7 +35,6 @@ Authoritative instructions for AI agents working in this repository. Use as guid
 | Test | `npm test` |
 | Lint | `npm run lint` |
 | Coverage | `npm run cover` |
-| Format | `npm run format` |
 | Composition example | `npm run start-composition` |
 | Federation example | `npm run start-federation` |
 
@@ -86,7 +84,7 @@ The library is a single-file module. All exports come from `src/index.ts`. The m
 - `else` / `catch` on new line
 - All scopes wrapped in `{ }`
 - No `any` unless suppressed by eslint comment with justification
-- Prefer `function` keyword over arrow functions for named functions
+- Use arrow functions when `this` binding is needed; use `function` keyword otherwise
 - Early returns to flatten logic; avoid deep nesting
 
 ---

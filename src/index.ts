@@ -40,7 +40,7 @@ export interface IDataSource {
  * @example
  * class MyDataSource {
  *   name = 'MyDataSource';
- *   
+ *
  *   // Context is required as first parameter when implementing
  *   getData(context: ComponentContext, id: string) {
  *     return { id };
@@ -50,7 +50,7 @@ export interface IDataSource {
 export type DataSourceDefinition<T> = {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   [P in keyof T]: T[P] extends Function ? (context: ComponentContext, ...args: any[]) => any : T[P];
-}
+};
 
 /**
  * Type for consuming data sources in resolvers
@@ -66,7 +66,7 @@ export type DataSourceDefinition<T> = {
  */
 export type DataSource<T> = {
   [P in keyof T]: T[P] extends (context: ComponentContext, ...p: infer P) => infer R ? (...p: P) => R : T[P];
-}
+};
 
 export type DataSourceMap = { [key: string]: IDataSource };
 
@@ -82,7 +82,7 @@ export interface IContextWrapper extends ContextFunction {
 }
 
 export interface IGraphQLComponentOptions<TContextType extends ComponentContext = ComponentContext> {
-  types?: TypeSource
+  types?: TypeSource;
   resolvers?: IResolvers<any, TContextType>;
   mocks?: boolean | IMocks;
   imports?: (IGraphQLComponent | IGraphQLComponentConfigObject)[];
@@ -90,9 +90,9 @@ export interface IGraphQLComponentOptions<TContextType extends ComponentContext 
   dataSources?: IDataSource[];
   dataSourceOverrides?: IDataSource[];
   pruneSchema?: boolean;
-  pruneSchemaOptions?: PruneSchemaOptions
+  pruneSchemaOptions?: PruneSchemaOptions;
   federation?: boolean;
-  transforms?: SchemaMapper[]
+  transforms?: SchemaMapper[];
 }
 
 export interface IGraphQLComponent<TContextType extends ComponentContext = ComponentContext> {
@@ -112,7 +112,7 @@ export interface IGraphQLComponent<TContextType extends ComponentContext = Compo
  * @template TContextType - The type of the context object
  * @implements {IGraphQLComponent}
  */
-export default class GraphQLComponent<TContextType extends ComponentContext = ComponentContext> implements IGraphQLComponent<TContextType>  {
+export default class GraphQLComponent<TContextType extends ComponentContext = ComponentContext> implements IGraphQLComponent<TContextType> {
   private _schema: GraphQLSchema | null = null;
   private _types: TypeSource;
   private _resolvers: IResolvers<any, TContextType>;
@@ -307,7 +307,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       if (this._federation) {
         makeSchema = buildFederatedSchema;
-      } else {
+      }
+      else {
         makeSchema = makeExecutableSchema;
       }
 
@@ -335,7 +336,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         const schemaConfig = {
           typeDefs: !this._federation && Array.isArray(this._types) && this._types.length === 1 ? this._types[0] : mergeTypeDefs(this._types),
           resolvers: this._resolvers
-        }
+        };
 
         this._schema = makeSchema(schemaConfig);
       }
@@ -346,7 +347,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       if (this._mocks === true) {
         this._schema = addMocksToSchema({ schema: this._schema, preserveResolvers: true });
-      } else if (this._mocks && typeof this._mocks === 'object') {
+      }
+      else if (this._mocks && typeof this._mocks === 'object') {
         this._schema = addMocksToSchema({ schema: this._schema, mocks: this._mocks, preserveResolvers: true });
       }
 
@@ -355,7 +357,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       }
 
       return this._schema;
-    } 
+    }
     catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to create schema for component ${this.name}: ${message}`, { cause: err });
@@ -435,7 +437,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
               }
             }
             return result;
-          }
+          };
         }
         functions[key].push(fn);
       }
@@ -485,12 +487,12 @@ module.exports.default = GraphQLComponent;
 
 /**
  * Wraps data sources with a proxy that intercepts calls to data source methods and injects the current context
- * @param {IDataSource[]} dataSources 
- * @param {IDataSource[]} dataSourceOverrides 
+ * @param {IDataSource[]} dataSources
+ * @param {IDataSource[]} dataSourceOverrides
  * @returns {DataSourceInjectionFunction} a function that returns a map of data sources with methods that have been intercepted
  */
-const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceOverrides: IDataSource[]): DataSourceInjectionFunction => {
-  const intercept = (instance: IDataSource, context: Record<string, unknown>) => {
+function createDataSourceContextInjector(dataSources: IDataSource[], dataSourceOverrides: IDataSource[]): DataSourceInjectionFunction {
+  function intercept(instance: IDataSource, context: Record<string, unknown>) {
     // Cache wrapped functions per proxy to avoid creating new wrappers on every property access
     const wrappedMethods = new Map<string | symbol, (...args: unknown[]) => unknown>();
 
@@ -512,9 +514,9 @@ const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceO
         return wrapped;
       }
     }) as DataSource<typeof instance>;
-  };
+  }
 
-  return (context: Record<string, unknown> = {}): DataSourceMap => {
+  return function (context: Record<string, unknown> = {}): DataSourceMap {
     const proxiedDataSources: DataSourceMap = {};
 
     // Inject data sources
@@ -529,7 +531,7 @@ const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceO
 
     return proxiedDataSources;
   };
-};
+}
 
 /**
  * memoizes resolver functions such that calls of an identical resolver (args/context/path) within the same request context are avoided
@@ -620,10 +622,12 @@ const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IReso
       if (typeof resolver === 'function') {
         if (type === 'Query') {
           typeResolvers[field] = memoize(type, field, resolver.bind(bindContext));
-        } else {
+        }
+        else {
           typeResolvers[field] = resolver.bind(bindContext);
         }
-      } else {
+      }
+      else {
         typeResolvers[field] = resolver;
       }
     }

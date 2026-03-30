@@ -28,7 +28,6 @@
     "lint": "npx eslint 'src/**/*.ts'",
     "cover": "nyc npm test",
     "update-deps": "ncu -u && npm install",
-    "format": "prettier --write \"src/**/*.ts\"",
     "precommit": "npm run lint && npm run test",
     "prepare": "husky install"
   },
@@ -61,7 +60,6 @@
     "husky": "^8.0.0",
     "npm-check-updates": "^17.1.11",
     "nyc": "^17.1.0",
-    "prettier": "^2.8.8",
     "sinon": "^19.0.2",
     "tape": "^5.9.0",
     "ts-node": "^10.9.2",
