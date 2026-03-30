@@ -64,6 +64,8 @@ const component = new GraphQLComponent({
 
 This uses `@apollo/federation`'s `buildFederatedSchema()` instead of `makeExecutableSchema()`.
 
+**Note:** If a child component needs to build a federated schema, set `federation: true` on the child component directly. The parent does not propagate its federation flag to imported components.
+
 ## API Reference
 
 ### GraphQLComponent Constructor
@@ -75,7 +77,7 @@ new GraphQLComponent(options: IGraphQLComponentOptions)
 #### Options
 
 - `types`: `string | string[]` - GraphQL SDL type definitions
-- `resolvers`: `object` - Resolver map for the schema
+- `resolvers`: `object` - Resolver map for the schema. Query resolvers are automatically memoized per request context; Mutation and other resolvers are not memoized
 - `imports`: `Array<Component | ConfigObject>` - Components to import
 - `context`: `{ namespace: string, factory: Function }` - Context configuration
 - `mocks`: `boolean | object` - Enable default or custom mocks
@@ -104,12 +106,23 @@ interface IGraphQLComponent {
 
 ### Component Instance Methods
 
+#### invalidateSchema()
+
+Clears the cached schema, causing it to be rebuilt on next access. Useful when transforms or configuration have changed:
+
+```typescript
+component.invalidateSchema();
+const freshSchema = component.schema; // rebuilt from types/resolvers
+```
+
 #### dispose()
 
-Cleans up internal references and resources. Call this method when you're done with a component instance to help with garbage collection:
+Marks the component as disposed and nulls all internal references. After calling `dispose()`, any access to component properties (`schema`, `context`, `types`, `resolvers`, `imports`, `dataSources`, `dataSourceOverrides`) will throw an error. Use the `disposed` getter to check disposal state:
 
 ```typescript
 component.dispose();
+console.log(component.disposed); // true
+component.schema; // throws: GraphQLComponent "..." has been disposed and cannot be used
 ```
 
 ## Migration from v5.x to v6.x

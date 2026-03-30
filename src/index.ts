@@ -26,6 +26,7 @@ export interface ComponentContext extends Record<string, unknown> {
   dataSources: DataSourceMap;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ContextFunction = ((context: Record<string, unknown>) => any);
 
 export interface IDataSource {
@@ -77,7 +78,7 @@ export interface IContextConfig {
 }
 
 export interface IContextWrapper extends ContextFunction {
-  use: (name: string | ContextFunction | null, fn?: ContextFunction | string) => void;
+  use: (name: string | ContextFunction, fn?: ContextFunction) => () => void;
 }
 
 export interface IGraphQLComponentOptions<TContextType extends ComponentContext = ComponentContext> {
@@ -112,21 +113,24 @@ export interface IGraphQLComponent<TContextType extends ComponentContext = Compo
  * @implements {IGraphQLComponent}
  */
 export default class GraphQLComponent<TContextType extends ComponentContext = ComponentContext> implements IGraphQLComponent<TContextType>  {
-  _schema: GraphQLSchema;
-  _types: TypeSource;
-  _resolvers: IResolvers<any, TContextType>;
-  _mocks: boolean | IMocks;
-  _imports: IGraphQLComponentConfigObject[];
-  _context: ContextFunction;
-  _dataSources: IDataSource[];
-  _dataSourceOverrides: IDataSource[];
-  _pruneSchema: boolean;
-  _pruneSchemaOptions: PruneSchemaOptions
-  _federation: boolean;
-  _dataSourceContextInject: DataSourceInjectionFunction;
-  _transforms: SchemaMapper[]
-  private _transformedSchema: GraphQLSchema;
+  private _schema: GraphQLSchema | null = null;
+  private _types: TypeSource;
+  private _resolvers: IResolvers<any, TContextType>;
+  private _mocks: boolean | IMocks;
+  private _imports: IGraphQLComponentConfigObject[];
+  private _context: ContextFunction;
+  private _dataSources: IDataSource[];
+  private _dataSourceOverrides: IDataSource[];
+  private _pruneSchema: boolean;
+  private _pruneSchemaOptions: PruneSchemaOptions;
+  private _federation: boolean;
+  private _dataSourceContextInject: DataSourceInjectionFunction;
+  private _transforms: SchemaMapper[];
+  private _transformedSchema: GraphQLSchema | null = null;
   private _middleware: MiddlewareEntry[] = [];
+  private _disposed = false;
+  private _contextWrapper: IContextWrapper | null = null;
+  private _importInjectors: DataSourceInjectionFunction[] | null = null;
 
   constructor({
     types,
@@ -166,27 +170,19 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       if (!i) {
         throw new Error('Import cannot be undefined or null');
       }
-      
+
       // Check if it's already a config object (has 'component' property)
       if ('component' in i && i.component) {
-        const importConfiguration = i as IGraphQLComponentConfigObject;
-        if (this._federation === true) {
-          importConfiguration.component.federation = true;
-        }
-        return importConfiguration;
+        return i as IGraphQLComponentConfigObject;
       }
-      
+
       // Otherwise, treat it as an IGraphQLComponent and wrap it
-      const component = i as IGraphQLComponent;
-      if (this._federation === true) {
-        component.federation = true;
-      }
-      return { component };
+      return { component: i as IGraphQLComponent };
     }) : [];
 
     this._context = async (globalContext: Record<string, unknown>): Promise<TContextType> => {
       //BREAKING: The context injected into data sources won't have data sources on it
-      const ctx = {
+      const ctx: Record<string, unknown> = {
         dataSources: globalContext.dataSources || {}
       };
 
@@ -226,35 +222,48 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       return ctx as TContextType;
     };
 
-    this.validateConfig({ types, imports, mocks, federation });
+    this.validateConfig({ types, imports, mocks, federation, context, transforms });
 
   }
 
+  get disposed(): boolean {
+    return this._disposed;
+  }
+
+  private _assertNotDisposed(): void {
+    if (this._disposed) {
+      throw new Error(`GraphQLComponent "${this.name}" has been disposed and cannot be used`);
+    }
+  }
+
   get context(): IContextWrapper {
-    // Cache middleware array to avoid recreation
+    this._assertNotDisposed();
+
+    if (this._contextWrapper) {
+      return this._contextWrapper;
+    }
+
+    // Cache injectors for imported components so they aren't recreated per request
+    if (!this._importInjectors && this._imports.length > 0) {
+      this._importInjectors = this._imports.map(({ component }) =>
+        createDataSourceContextInjector(component.dataSources, component.dataSourceOverrides)
+      );
+    }
+    const importInjectors = this._importInjectors;
+
     const contextFn = async (context: Record<string, unknown>): Promise<ComponentContext> => {
-      
-      // Inject dataSources early so middleware can access them
       const dataSources = this._dataSourceContextInject(context);
-      
-      // Also gather data sources from imported components for middleware
+
       const importedDataSources = {};
-      if (this._imports.length > 0) {
-        for (const { component } of this._imports) {
-          // Use the public dataSources getter and manually inject them
-          const componentDataSourcesArray = component.dataSources;
-          const componentDataSourceOverrides = component.dataSourceOverrides;
-          const componentInjector = createDataSourceContextInjector(componentDataSourcesArray, componentDataSourceOverrides);
-          const componentDataSources = componentInjector(context);
-          Object.assign(importedDataSources, componentDataSources);
+      if (importInjectors) {
+        for (const injector of importInjectors) {
+          Object.assign(importedDataSources, injector(context));
         }
       }
-      
-      // Combine all data sources for middleware
+
       const allDataSources = Object.assign({}, dataSources, importedDataSources);
       let processedContext = Object.assign({}, context, { dataSources: allDataSources });
-      
-      // Apply middleware more efficiently
+
       if (this._middleware.length > 0) {
         for (const mw of this._middleware) {
           processedContext = await mw.fn(processedContext);
@@ -263,21 +272,27 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       const componentContext = await this._context(processedContext);
 
-      // More efficient object composition
       return Object.assign({}, processedContext, componentContext);
     };
 
-    contextFn.use = (name: string | ContextFunction, fn?: ContextFunction): IContextWrapper => {
+    contextFn.use = (name: string | ContextFunction, fn?: ContextFunction): (() => void) => {
       if (typeof name === 'function') {
         fn = name;
-        name = 'unknown';
+        name = `middleware_${this._middleware.length}`;
       }
+      if (typeof fn !== 'function') {
+        throw new Error(`Middleware "${name}" requires a function argument`);
+      }
+      const entry = { name: name as string, fn };
+      this._middleware.push(entry);
 
-      this._middleware.push({ name: name as string, fn: fn! });
-
-      return contextFn;
+      return () => {
+        const index = this._middleware.indexOf(entry);
+        if (index > -1) this._middleware.splice(index, 1);
+      };
     };
 
+    this._contextWrapper = contextFn;
     return contextFn;
   }
 
@@ -286,11 +301,13 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
   }
 
   get schema(): GraphQLSchema {
+    this._assertNotDisposed();
     try {
       if (this._schema) {
         return this._schema;
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let makeSchema: (schemaConfig: any) => GraphQLSchema;
 
       if (this._federation) {
@@ -348,28 +365,34 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       return this._schema;
     } 
-    catch (error) {
-      throw new Error(`Failed to create schema for component ${this.name}: ${error.message}`);
+    catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to create schema for component ${this.name}: ${message}`, { cause: err });
     }
   }
 
   get types(): TypeSource {
+    this._assertNotDisposed();
     return this._types;
   }
 
   get resolvers(): IResolvers<any, TContextType> {
+    this._assertNotDisposed();
     return this._resolvers;
   }
 
   get imports(): IGraphQLComponentConfigObject[] {
+    this._assertNotDisposed();
     return this._imports;
   }
 
   get dataSources(): IDataSource[] {
+    this._assertNotDisposed();
     return this._dataSources;
   }
 
   get dataSourceOverrides(): IDataSource[] {
+    this._assertNotDisposed();
     return this._dataSourceOverrides;
   }
 
@@ -382,12 +405,21 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
   }
 
   public dispose(): void {
+    this._disposed = true;
     this._schema = null;
-    this._types = null;
-    this._resolvers = null;
-    this._imports = null;
-    this._dataSources = null;
-    this._dataSourceOverrides = null;
+    this._transformedSchema = null;
+    this._types = null as unknown as TypeSource;
+    this._resolvers = null as unknown as IResolvers;
+    this._imports = null as unknown as IGraphQLComponentConfigObject[];
+    this._dataSources = null as unknown as IDataSource[];
+    this._dataSourceOverrides = null as unknown as IDataSource[];
+    this._mocks = null as unknown as boolean | IMocks;
+    this._context = null as unknown as ContextFunction;
+    this._dataSourceContextInject = null as unknown as DataSourceInjectionFunction;
+    this._transforms = null as unknown as SchemaMapper[];
+    this._middleware = [];
+    this._contextWrapper = null;
+    this._importInjectors = null;
   }
 
   private transformSchema(schema: GraphQLSchema, transforms: SchemaMapper[]): GraphQLSchema {
@@ -395,17 +427,16 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       return this._transformedSchema;
     }
 
-    const functions = {};
-    const mapping = {};
+    const functions: Record<string, ((...args: unknown[]) => unknown)[]> = {};
+    const mapping: Record<string, (...args: unknown[]) => unknown> = {};
 
     for (const transform of transforms) {
       for (const [key, fn] of Object.entries(transform)) {
         if (!mapping[key]) {
           functions[key] = [];
-          mapping[key] = function (...args) {
+          mapping[key] = function (...args: unknown[]) {
             let result;
-            while (functions[key].length) {
-              const mapper = functions[key].shift();
+            for (const mapper of functions[key]) {
               result = mapper(...args);
               if (!result) {
                 break;
@@ -422,20 +453,40 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     return this._transformedSchema;
   }
 
+  public invalidateSchema(): void {
+    this._schema = null;
+    this._transformedSchema = null;
+  }
+
   private validateConfig(options: IGraphQLComponentOptions): void {
     if (options.federation && !options.types) {
       throw new Error('Federation requires type definitions');
     }
 
-    if (options.mocks && typeof options.mocks !== 'boolean' && typeof options.mocks !== 'object') {
+    if (options.mocks !== null && options.mocks !== undefined
+        && typeof options.mocks !== 'boolean' && typeof options.mocks !== 'object') {
       throw new Error('mocks must be either boolean or object');
+    }
+
+    if (options.context) {
+      if (!options.context.namespace || typeof options.context.namespace !== 'string') {
+        throw new Error('context.namespace must be a non-empty string');
+      }
+      if (typeof options.context.factory !== 'function') {
+        throw new Error('context.factory must be a function');
+      }
+    }
+
+    if (options.transforms !== undefined && !Array.isArray(options.transforms)) {
+      throw new Error('transforms must be an array');
     }
   }
 
 }
 
-// For backward compatibility
+// For backward compatibility with CommonJS require()
 module.exports = GraphQLComponent;
+module.exports.default = GraphQLComponent;
 
 /**
  * Wraps data sources with a proxy that intercepts calls to data source methods and injects the current context
@@ -444,7 +495,7 @@ module.exports = GraphQLComponent;
  * @returns {DataSourceInjectionFunction} a function that returns a map of data sources with methods that have been intercepted
  */
 const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceOverrides: IDataSource[]): DataSourceInjectionFunction => {
-  const intercept = (instance: IDataSource, context: any) => {
+  const intercept = (instance: IDataSource, context: Record<string, unknown>) => {
 
     return new Proxy(instance, {
       get(target, key) {
@@ -453,15 +504,15 @@ const createDataSourceContextInjector = (dataSources: IDataSource[], dataSourceO
         }
         const original = target[key];
 
-        return function (...args) {
+        return function (...args: unknown[]) {
           return original.call(instance, context, ...args);
         };
       }
-    }) as any as DataSource<typeof instance>;
+    }) as DataSource<typeof instance>;
   };
 
-  return (context: any = {}): DataSourceMap => {
-    const proxiedDataSources = {};
+  return (context: Record<string, unknown> = {}): DataSourceMap => {
+    const proxiedDataSources: DataSourceMap = {};
 
     // Inject data sources
     for (const dataSource of dataSources) {
@@ -525,7 +576,7 @@ const memoize = function (parentType: string, fieldName: string, resolve: Resolv
  * map, except with resolver function bound to the input argument bind
  */
 const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IResolvers = {}): IResolvers {
-  const boundResolvers = {};
+  const boundResolvers: Record<string, Record<string, unknown> | GraphQLScalarType> = {};
 
   for (const [type, fields] of Object.entries(resolvers)) {
     // dont bind an object that is an instance of a graphql scalar
@@ -538,23 +589,25 @@ const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IReso
       boundResolvers[type] = {};
     }
 
+    const typeResolvers = boundResolvers[type] as Record<string, unknown>;
+
     for (const [field, resolver] of Object.entries(fields)) {
-      if (['Query', 'Mutation'].indexOf(type) > -1) {
-        boundResolvers[type][field] = memoize(type, field, resolver.bind(bindContext));
+      if (type === 'Query') {
+        typeResolvers[field] = memoize(type, field, resolver.bind(bindContext));
       }
       else {
         // only bind resolvers that are functions
         if (typeof resolver === 'function') {
-          boundResolvers[type][field] = resolver.bind(bindContext);
+          typeResolvers[field] = resolver.bind(bindContext);
         }
         else {
-          boundResolvers[type][field] = resolver;
+          typeResolvers[field] = resolver;
         }
       }
     }
   }
 
-  return boundResolvers;
+  return boundResolvers as IResolvers;
 };
 
 interface MiddlewareEntry {
