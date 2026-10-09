@@ -1,6 +1,6 @@
 import test from 'tape';
 import sinon from 'sinon';
-import { graphql } from 'graphql';
+import { graphql, parse } from 'graphql';
 import GraphQLComponent, { IGraphQLComponent } from '../src/index';
 import { MapperKind } from '@graphql-tools/utils';
 import { GraphQLFieldConfig } from 'graphql';
@@ -161,7 +161,9 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     assert.end();
   });
 
-  t.test('nested imports (3 levels) preserve precedence and context order', async (assert) => {
+  t.test('nested imports (3 levels) produce no false-positive context collision warnings', async (assert) => {
+    const warn = sinon.stub(console, 'warn');
+
     const level3 = new GraphQLComponent({
       name: 'L3',
       types: 'type Query { l3: String }',
@@ -193,10 +195,13 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     root.context.use('root', async (ctx) => ({ ...ctx, rootFlag: true }));
 
     const ctx = await root.context({});
+    const ignoredKeyWarnings = warn.getCalls().filter((c) => String(c.args[0]).includes('top-level context key'));
+    assert.equal(ignoredKeyWarnings.length, 0, 'no spurious top-level collision warnings');
     assert.ok(ctx.rootFlag, 'root middleware applied');
     assert.ok(ctx.l2.ready, 'level2 namespace present');
     assert.equal(ctx.l3.sawRoot, true, 'level3 factory saw root middleware through import chain');
     assert.equal(ctx.l3.sawL2, true, 'level3 factory saw level2 namespace before import processing');
+    warn.restore();
     assert.end();
   });
 
@@ -225,6 +230,38 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     const ctx = await parent.context({});
     assert.equal(ctx.fromParent, 'parent', 'parent middleware value on context');
     assert.equal(ctx.fromChild, 'parent-child', 'child middleware saw parent output');
+    assert.end();
+  });
+
+  t.test('schema transforms continue chaining when a mapper returns undefined', (assert) => {
+    let secondRan = false;
+    const component = new GraphQLComponent({
+      types: 'type Query { hello: String }',
+      resolvers: { Query: { hello: () => 'world' } },
+      transforms: [
+        {
+          [MapperKind.OBJECT_FIELD]: (field: GraphQLFieldConfig<unknown, unknown>, fieldName: string) => {
+            if (fieldName !== 'hello') {
+              return field;
+            }
+            return undefined;
+          }
+        },
+        {
+          [MapperKind.OBJECT_FIELD]: (field: GraphQLFieldConfig<unknown, unknown>, fieldName: string) => {
+            if (fieldName !== 'hello') {
+              return field;
+            }
+            secondRan = true;
+            return { ...field, description: 'step-two' };
+          }
+        }
+      ]
+    });
+
+    const description = component.schema.getQueryType()?.getFields().hello.description;
+    assert.ok(secondRan, 'second mapper ran after undefined from first');
+    assert.equal(description, 'step-two', 'chained transform applied');
     assert.end();
   });
 
@@ -257,6 +294,151 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     assert.end();
   });
 
+  t.test('sibling imports with same data source class dedupe silently', (assert) => {
+    class SharedDS {
+      name = 'shared';
+      tag: string;
+      constructor(tag: string) {
+        this.tag = tag;
+      }
+      getTag() {
+        return this.tag;
+      }
+    }
+
+    const comp1 = new GraphQLComponent({
+      name: 'CompOne',
+      types: 'type Query { a: String }',
+      dataSources: [new SharedDS('one')]
+    });
+    const comp2 = new GraphQLComponent({
+      name: 'CompTwo',
+      types: 'type Query { b: String }',
+      dataSources: [new SharedDS('two')]
+    });
+
+    assert.doesNotThrow(() => {
+      new GraphQLComponent({
+        name: 'Parent',
+        types: 'type Query { p: String }',
+        imports: [comp1, comp2]
+      });
+    }, 'same constructor sibling collision is silent');
+    assert.end();
+  });
+
+  t.test('sibling imports with different data source implementations throw without override', (assert) => {
+    class DsA {
+      name = 'users';
+      who() {
+        return 'a';
+      }
+    }
+    class DsB {
+      name = 'users';
+      who() {
+        return 'b';
+      }
+    }
+
+    const comp1 = new GraphQLComponent({
+      name: 'CompOne',
+      types: 'type Query { a: String }',
+      dataSources: [new DsA()]
+    });
+    const comp2 = new GraphQLComponent({
+      name: 'CompTwo',
+      types: 'type Query { b: String }',
+      dataSources: [new DsB()]
+    });
+
+    assert.throws(() => {
+      new GraphQLComponent({
+        name: 'Parent',
+        types: 'type Query { p: String }',
+        imports: [comp1, comp2]
+      });
+    }, /different implementations/, 'throws when sibling imports disagree');
+    assert.end();
+  });
+
+  t.test('parent dataSourceOverrides suppress collision warning and win for import resolvers', async (assert) => {
+    const warn = sinon.stub(console, 'warn');
+
+    class ImportUsers {
+      name = 'users';
+      who() {
+        return 'import';
+      }
+    }
+    class OverrideUsers {
+      name = 'users';
+      who() {
+        return 'override';
+      }
+    }
+
+    const child = new GraphQLComponent({
+      name: 'Child',
+      types: 'type Query { who: String }',
+      resolvers: {
+        Query: {
+          who(_: unknown, __: unknown, ctx: { dataSources: { users: { who: () => string } } }) {
+            return ctx.dataSources.users.who();
+          }
+        }
+      },
+      dataSources: [new ImportUsers()]
+    });
+
+    const parent = new GraphQLComponent({
+      name: 'Parent',
+      types: 'type Query { parent: String }',
+      imports: [child],
+      dataSourceOverrides: [new OverrideUsers()]
+    });
+
+    const parentImportWarnings = warn.getCalls().filter((c) =>
+      String(c.args[0]).includes('defined on this component and on an import')
+    );
+    assert.equal(parentImportWarnings.length, 0, 'no parent/import data source collision warning when override set');
+
+    const ctx = await parent.context({});
+    assert.equal(ctx.dataSources.users.who(), 'override', 'override instance used at runtime');
+
+    const result = await graphql({
+      schema: parent.schema,
+      source: '{ who }',
+      contextValue: ctx
+    });
+    assert.equal(result.data?.who, 'override', 'import resolver sees overridden data source');
+    warn.restore();
+    assert.end();
+  });
+
+  t.test('middleware can call local data sources with context accumulated so far', async (assert) => {
+    class AuthUsers {
+      name = 'users';
+      loadUser(context: Record<string, unknown>) {
+        return context.token ? `user-for-${context.token}` : null;
+      }
+    }
+
+    const component = new GraphQLComponent({
+      types: 'type Query { me: String }',
+      dataSources: [new AuthUsers()]
+    });
+
+    component.context.use('auth', async (ctx) => {
+      const user = (ctx.dataSources as { users: { loadUser: () => string | null } }).users.loadUser();
+      return { ...ctx, user };
+    });
+
+    const ctx = await component.context({ token: 'abc' }) as Record<string, unknown>;
+    assert.equal(ctx.user, 'user-for-abc', 'middleware loaded user via data source');
+    assert.end();
+  });
+
   t.test('memoize caches falsy query results', async (assert) => {
     let calls = 0;
     const component = new GraphQLComponent({
@@ -280,6 +462,32 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     await graphql({ schema, source: query, contextValue: ctx });
     await graphql({ schema, source: query, contextValue: ctx });
     assert.equal(calls, 1, 'null result memoized for custom root query type');
+    assert.end();
+  });
+
+  t.test('memoize uses root query type from DocumentNode SDL', async (assert) => {
+    let calls = 0;
+    const types = parse(`
+      schema { query: RootQuery }
+      type RootQuery { value: String }
+    `);
+    const component = new GraphQLComponent({
+      types,
+      resolvers: {
+        RootQuery: {
+          value: () => {
+            calls++;
+            return 'x';
+          }
+        }
+      }
+    });
+
+    const schema = component.schema;
+    const ctx = { rid: 1 };
+    await graphql({ schema, source: '{ value }', contextValue: ctx });
+    await graphql({ schema, source: '{ value }', contextValue: ctx });
+    assert.equal(calls, 1, 'DocumentNode schema query root is memoized');
     assert.end();
   });
 

@@ -1,5 +1,5 @@
 import { buildFederatedSchema } from '@apollo/federation';
-import { GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema } from 'graphql';
+import { DocumentNode, GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema, print } from 'graphql';
 
 import { mergeTypeDefs } from '@graphql-tools/merge';
 import {
@@ -70,7 +70,7 @@ export type DataSource<T> = {
 
 export type DataSourceMap = { [key: string]: IDataSource };
 
-export type DataSourceInjectionFunction = ((context: Record<string, unknown>) => DataSourceMap);
+export type DataSourceInjectionFunction = ((context?: Record<string, unknown>) => DataSourceMap);
 
 export interface IContextConfig {
   namespace: string;
@@ -224,16 +224,37 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     const contextFn = async (incomingContext: Record<string, unknown>): Promise<ComponentContext> => {
       this._assertNotDisposed();
 
-      let ctx: Record<string, unknown> = Object.assign({}, incomingContext);
+      const injectionRef: Record<string, unknown> = Object.assign({}, incomingContext);
+      const getInjectionContext = (): Record<string, unknown> => contextForDataSourceInjection(injectionRef);
+      const localDataSources = createDataSourceContextInjector(
+        this._dataSources,
+        this._dataSourceOverrides,
+        getInjectionContext
+      )();
+
+      const syncInjectionRef = (nextCtx: Record<string, unknown>): void => {
+        for (const key of Object.keys(injectionRef)) {
+          delete injectionRef[key];
+        }
+        Object.assign(injectionRef, nextCtx);
+        delete injectionRef.dataSources;
+      };
+
+      let ctx: Record<string, unknown> = Object.assign({}, incomingContext, { dataSources: localDataSources });
+      syncInjectionRef(ctx);
 
       const middleware = [...this._middleware];
       for (const mw of middleware) {
         ctx = await mw.fn(ctx);
+        ctx = Object.assign({}, ctx, { dataSources: localDataSources });
+        syncInjectionRef(ctx);
       }
 
       if (this._contextConfig) {
         const nsCtx = await this._contextConfig.factory.call(this, ctx);
         ctx[this._contextConfig.namespace] = Object.assign({}, nsCtx);
+        ctx = Object.assign({}, ctx, { dataSources: localDataSources });
+        syncInjectionRef(ctx);
       }
 
       let importResults: ComponentContext[] = [];
@@ -244,11 +265,11 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         for (const imported of importResults) {
           mergeImportedTopLevelContext(ctx, imported, this.name, warnedTopLevelCollisions);
         }
+        ctx = Object.assign({}, ctx, { dataSources: localDataSources });
+        syncInjectionRef(ctx);
       }
 
-      const injectionContext = contextForDataSourceInjection(ctx);
-      const dataSources = this._dataSourceContextInject(injectionContext);
-
+      const dataSources: DataSourceMap = Object.assign({}, localDataSources);
       for (const imported of importResults) {
         mergeImportedDataSources(dataSources, imported.dataSources || {}, this.name, warnedTopLevelCollisions);
       }
@@ -424,11 +445,13 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
               const next = mapped
                 ? mapper(current, ...args.slice(1))
                 : mapper(...args);
-              if (next === undefined) {
-                break;
+              if (next === null) {
+                return null;
               }
-              current = next;
-              mapped = true;
+              if (next !== undefined) {
+                current = next;
+                mapped = true;
+              }
             }
             return mapped ? current : args[0];
           };
@@ -482,7 +505,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     const overrideKeys = new Set(
       this._dataSourceOverrides.map((ds) => resolveDataSourceKey(ds))
     );
-    const siblingKeys = new Map<string, string>();
+    const siblingByKey = new Map<string, { component: IGraphQLComponent; ctor: IDataSource['constructor'] }>();
     const warned = new Set<string>();
 
     for (const { component } of this._imports) {
@@ -495,17 +518,26 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
             'the parent instance wins at runtime. Use dataSourceOverrides to replace an import data source intentionally.'
           );
         }
+      }
 
-        const prior = siblingKeys.get(dsKey);
-        if (prior && prior !== component.name && !warned.has(`sibling:${dsKey}`)) {
-          warned.add(`sibling:${dsKey}`);
-          console.warn(
-            `GraphQLComponent "${this.name}": data source key "${dsKey}" is defined by multiple imports; ` +
-            'the first import in the imports array wins at runtime.'
-          );
+      for (const dataSource of component.dataSources || []) {
+        const dsKey = resolveDataSourceKey(dataSource);
+        const prior = siblingByKey.get(dsKey);
+        if (!prior) {
+          siblingByKey.set(dsKey, { component, ctor: dataSource.constructor });
+          continue;
         }
-        else if (!prior) {
-          siblingKeys.set(dsKey, component.name);
+        if (prior.component === component) {
+          continue;
+        }
+        if (prior.ctor === dataSource.constructor) {
+          continue;
+        }
+        if (!overrideKeys.has(dsKey)) {
+          throw new Error(
+            `GraphQLComponent "${this.name}": data source key "${dsKey}" is defined by multiple imports with different implementations. ` +
+            'Add dataSourceOverrides on the parent to select which implementation to use.'
+          );
         }
       }
     }
@@ -557,13 +589,24 @@ function collectImportDataSourceKeys(component: IGraphQLComponent): Set<string> 
   return keys;
 }
 
+function typeSourceToSdl(source: unknown): string | null {
+  if (typeof source === 'string') {
+    return source;
+  }
+  if (source && typeof source === 'object' && (source as DocumentNode).kind === 'Document') {
+    return print(source as DocumentNode);
+  }
+  return null;
+}
+
 function inferRootQueryTypeName(types: TypeSource): string {
   const sources = Array.isArray(types) ? types : [types];
   for (const source of sources) {
-    if (typeof source !== 'string') {
+    const sdl = typeSourceToSdl(source);
+    if (!sdl) {
       continue;
     }
-    const match = source.match(/schema\s*\{[^}]*\bquery\s*:\s*(\w+)/i);
+    const match = sdl.match(/schema\s*\{[^}]*\bquery\s*:\s*(\w+)/i);
     if (match) {
       return match[1];
     }
@@ -588,11 +631,13 @@ function mergeImportedTopLevelContext(
       continue;
     }
     if (Object.prototype.hasOwnProperty.call(target, key)) {
-      if (!warnedCollisions.has(`ctx:${key}`)) {
-        warnedCollisions.add(`ctx:${key}`);
-        console.warn(
-          `GraphQLComponent "${componentName}": top-level context key "${key}" from an import was ignored because the parent context already defines it.`
-        );
+      if (target[key] !== value) {
+        if (!warnedCollisions.has(`ctx:${key}`)) {
+          warnedCollisions.add(`ctx:${key}`);
+          console.warn(
+            `GraphQLComponent "${componentName}": top-level context key "${key}" from an import was ignored because the parent context already defines it.`
+          );
+        }
       }
       continue;
     }
@@ -626,8 +671,12 @@ function mergeImportedDataSources(
  * @param {IDataSource[]} dataSourceOverrides
  * @returns {DataSourceInjectionFunction} a function that returns a map of data sources with methods that have been intercepted
  */
-function createDataSourceContextInjector(dataSources: IDataSource[], dataSourceOverrides: IDataSource[]): DataSourceInjectionFunction {
-  function intercept(instance: IDataSource, context: Record<string, unknown>) {
+function createDataSourceContextInjector(
+  dataSources: IDataSource[],
+  dataSourceOverrides: IDataSource[],
+  getInjectionContext?: () => Record<string, unknown>
+): DataSourceInjectionFunction {
+  function intercept(instance: IDataSource, resolveContext: () => Record<string, unknown>) {
     // Cache wrapped functions per proxy to avoid creating new wrappers on every property access
     const wrappedMethods = new Map<string | symbol, (...args: unknown[]) => unknown>();
 
@@ -641,7 +690,7 @@ function createDataSourceContextInjector(dataSources: IDataSource[], dataSourceO
         if (!wrapped) {
           const original = target[key];
           wrapped = function (...args: unknown[]) {
-            return original.call(instance, context, ...args);
+            return original.call(instance, resolveContext(), ...args);
           };
           wrappedMethods.set(key, wrapped);
         }
@@ -652,16 +701,17 @@ function createDataSourceContextInjector(dataSources: IDataSource[], dataSourceO
   }
 
   return function (context: Record<string, unknown> = {}): DataSourceMap {
+    const resolveContext = getInjectionContext ?? (() => contextForDataSourceInjection(context));
     const proxiedDataSources: DataSourceMap = {};
 
     // Inject data sources
     for (const dataSource of dataSources) {
-      proxiedDataSources[dataSource.name != null && dataSource.name !== '' ? dataSource.name : dataSource.constructor.name] = intercept(dataSource, context);
+      proxiedDataSources[dataSource.name != null && dataSource.name !== '' ? dataSource.name : dataSource.constructor.name] = intercept(dataSource, resolveContext);
     }
 
     // Override data sources
     for (const dataSourceOverride of dataSourceOverrides) {
-      proxiedDataSources[dataSourceOverride.name != null && dataSourceOverride.name !== '' ? dataSourceOverride.name : dataSourceOverride.constructor.name] = intercept(dataSourceOverride, context);
+      proxiedDataSources[dataSourceOverride.name != null && dataSourceOverride.name !== '' ? dataSourceOverride.name : dataSourceOverride.constructor.name] = intercept(dataSourceOverride, resolveContext);
     }
 
     return proxiedDataSources;

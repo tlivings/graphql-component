@@ -38,7 +38,40 @@ test('GraphQLComponent Context Tests', (t) => {
     assert.end();
   });
 
-  t.test('should expose dataSources on finished context after middleware', async (assert) => {
+  t.test('should have dataSources available in middleware', async (assert) => {
+    class TestDataSource {
+      name = 'TestDataSource';
+      
+      getData(context: any, id: string) {
+        return { id, fromDataSource: true };
+      }
+    }
+
+    const component = new GraphQLComponent({
+      types: `type Query { test: String }`,
+      dataSources: [new TestDataSource()]
+    });
+
+    let middlewareDataSources: any = null;
+    const contextFn = component.context;
+    contextFn.use('dataSourceTest', async (ctx) => {
+      middlewareDataSources = ctx.dataSources;
+      return {
+        ...ctx,
+        middlewareRan: true
+      };
+    });
+
+    const context = await contextFn({});
+    
+    assert.ok(middlewareDataSources, 'dataSources available in middleware');
+    assert.ok(middlewareDataSources.TestDataSource, 'TestDataSource available in middleware');
+    assert.equal(typeof middlewareDataSources.TestDataSource.getData, 'function', 'dataSource method available');
+    assert.ok(context.middlewareRan, 'middleware executed');
+    assert.end();
+  });
+
+  t.test('data sources see middleware output on finished context', async (assert) => {
     class TestDataSource {
       name = 'TestDataSource';
       
@@ -61,14 +94,11 @@ test('GraphQLComponent Context Tests', (t) => {
 
     const context = await contextFn({});
     
-    assert.ok(context.dataSources, 'dataSources on finished context');
-    assert.ok(context.dataSources.TestDataSource, 'TestDataSource available after pipeline');
     assert.deepEqual(
       context.dataSources.TestDataSource.getData('1'),
       { id: '1', fromDataSource: true, userId: 'mw-user' },
       'data source sees middleware output'
     );
-    assert.ok(context.middlewareRan, 'middleware executed');
     assert.end();
   });
 

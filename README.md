@@ -153,9 +153,9 @@ Per component, context is built in this order:
 2. Run this component’s middleware.
 3. Apply this component’s namespace context under its `context.namespace` key (a fresh object each request).
 4. Resolve imported components’ contexts in parallel and merge them (parent top-level keys win; namespace keys stay nested and do not collide).
-5. Build data source proxies once from the finished context so resolvers and data sources see middleware and namespace values.
+5. Attach this component’s data source proxies (stable for the request, reading context via a live ref) before middleware so middleware can call local data sources; refresh the ref after middleware, namespace, and import merges. Import data sources are merged last on the returned context.
 
-When a parent imports a child, the child’s middleware runs after the parent’s middleware on the same request. Data source key collisions between a parent and an import warn at construction unless the parent uses `dataSourceOverrides`; at runtime the parent’s data sources win. Colliding keys between sibling imports warn at construction and the first import in the `imports` array wins at runtime.
+When a parent imports a child, the child’s middleware runs after the parent’s middleware on the same request. Middleware on each component only sees that component’s own data sources (import data sources are merged afterward). Data source key collisions between a parent and an import warn at construction unless the parent uses `dataSourceOverrides`; at runtime the parent’s data sources win. Sibling imports with the same key and same data source class are deduped silently; different implementations throw at construction unless the parent provides `dataSourceOverrides`.
 
 Components can namespace their context contribution:
 
