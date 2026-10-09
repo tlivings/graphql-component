@@ -172,9 +172,9 @@ test('Async Import Context Building Tests', (t) => {
     
     const context = await parentComponent.context({});
     
-    // Last one should win (component2)
+    // First import in the array wins when sibling imports collide
     const result = context.dataSources.test.getData('123');
-    assert.equal(result, 'comp2-123', 'last imported data source wins in case of name collision');
+    assert.equal(result, 'comp1-123', 'first imported data source wins in case of sibling name collision');
     assert.end();
   });
   

@@ -82,6 +82,7 @@ export interface IContextWrapper extends ContextFunction {
 }
 
 export interface IGraphQLComponentOptions<TContextType extends ComponentContext = ComponentContext> {
+  name?: string;
   types?: TypeSource;
   resolvers?: IResolvers<any, TContextType>;
   mocks?: boolean | IMocks;
@@ -130,9 +131,11 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
   private _middleware: MiddlewareEntry[] = [];
   private _disposed = false;
   private _contextWrapper: IContextWrapper | null = null;
-  private _importInjectors: DataSourceInjectionFunction[] | null = null;
+  private _explicitName: string | undefined;
+  private _rootQueryTypeName: string;
 
   constructor({
+    name,
     types,
     resolvers,
     mocks,
@@ -146,9 +149,13 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     transforms
   }: IGraphQLComponentOptions) {
 
+    this._explicitName = name;
+
     this._types = types ? (Array.isArray(types) ? types : [types]) : [];
 
-    this._resolvers = bindResolvers(this, resolvers);
+    this._rootQueryTypeName = inferRootQueryTypeName(this._types);
+
+    this._resolvers = bindResolvers(this, resolvers, this._rootQueryTypeName);
 
     this._mocks = mocks;
 
@@ -191,6 +198,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
     this.validateConfig({ types, imports, mocks, federation, context, transforms });
 
+    this.validateDataSourceCollisions();
+
   }
 
   get disposed(): boolean {
@@ -210,64 +219,41 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
       return this._contextWrapper;
     }
 
-    // Cache injectors for imported components so they aren't recreated per request
-    if (!this._importInjectors && this._imports.length > 0) {
-      this._importInjectors = this._imports.map(({ component }) =>
-        createDataSourceContextInjector(component.dataSources || [], component.dataSourceOverrides || [])
-      );
-    }
-    const importInjectors = this._importInjectors;
-
-    const warnedCollisions = new Set<string>();
+    const warnedTopLevelCollisions = new Set<string>();
 
     const contextFn = async (incomingContext: Record<string, unknown>): Promise<ComponentContext> => {
       this._assertNotDisposed();
-      // 1. Inject this component's data sources
-      const dataSources = this._dataSourceContextInject(incomingContext);
 
-      // 2. Inject imported components' data sources (available to middleware)
-      if (importInjectors) {
-        for (const injector of importInjectors) {
-          const importedDS = injector(incomingContext);
-          for (const dsName of Object.keys(importedDS)) {
-            if (dataSources[dsName] && !warnedCollisions.has(dsName)) {
-              warnedCollisions.add(dsName);
-              console.warn(`GraphQLComponent "${this.name}": data source "${dsName}" is defined by multiple imports and will be overwritten`);
-            }
-          }
-          Object.assign(dataSources, importedDS);
-        }
-      }
-
-      // 3. Build context with all data sources and run middleware
-      let ctx: Record<string, unknown> = Object.assign({}, incomingContext, { dataSources });
+      let ctx: Record<string, unknown> = Object.assign({}, incomingContext);
 
       const middleware = [...this._middleware];
       for (const mw of middleware) {
         ctx = await mw.fn(ctx);
       }
 
-      // 4. Process imports in parallel for full context (namespace, non-DS context)
+      if (this._contextConfig) {
+        const nsCtx = await this._contextConfig.factory.call(this, ctx);
+        ctx[this._contextConfig.namespace] = Object.assign({}, nsCtx);
+      }
+
+      let importResults: ComponentContext[] = [];
       if (this._imports.length > 0) {
-        const importResults = await Promise.all(
+        importResults = await Promise.all(
           this._imports.map(({ component }) => component.context(ctx))
         );
-        for (const { dataSources: importDS, ...importedCtx } of importResults) {
-          Object.assign(ctx.dataSources, importDS);
-          Object.assign(ctx, importedCtx);
+        for (const imported of importResults) {
+          mergeImportedTopLevelContext(ctx, imported, this.name, warnedTopLevelCollisions);
         }
       }
 
-      // 5. Apply this component's namespace context
-      if (this._contextConfig) {
-        if (!ctx[this._contextConfig.namespace]) {
-          ctx[this._contextConfig.namespace] = {};
-        }
-        const nsCtx = await this._contextConfig.factory.call(this, ctx);
-        Object.assign(ctx[this._contextConfig.namespace] as Record<string, unknown>, nsCtx);
+      const injectionContext = contextForDataSourceInjection(ctx);
+      const dataSources = this._dataSourceContextInject(injectionContext);
+
+      for (const imported of importResults) {
+        mergeImportedDataSources(dataSources, imported.dataSources || {}, this.name, warnedTopLevelCollisions);
       }
 
-      return ctx as ComponentContext;
+      return Object.assign({}, ctx, { dataSources }) as ComponentContext;
     };
 
     contextFn.use = (name: string | ContextFunction, fn?: ContextFunction): (() => void) => {
@@ -292,7 +278,11 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
   }
 
   get name(): string {
-    return this.constructor.name;
+    const resolved = this._explicitName ?? this.constructor.name;
+    if (!this._explicitName && resolved.length <= 2) {
+      warnMinifiedConstructorName(resolved);
+    }
+    return resolved;
   }
 
   get schema(): GraphQLSchema {
@@ -413,7 +403,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     this._transforms = null as unknown as SchemaMapper[];
     this._middleware = [];
     this._contextWrapper = null;
-    this._importInjectors = null;
   }
 
   private transformSchema(schema: GraphQLSchema, transforms: SchemaMapper[]): GraphQLSchema {
@@ -429,14 +418,19 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         if (!mapping[key]) {
           functions[key] = [];
           mapping[key] = function (...args: unknown[]) {
-            let result;
+            let current: unknown = args[0];
+            let mapped = false;
             for (const mapper of functions[key]) {
-              result = mapper(...args);
-              if (result === undefined) {
+              const next = mapped
+                ? mapper(current, ...args.slice(1))
+                : mapper(...args);
+              if (next === undefined) {
                 break;
               }
+              current = next;
+              mapped = true;
             }
-            return result;
+            return mapped ? current : args[0];
           };
         }
         functions[key].push(fn);
@@ -479,11 +473,152 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     }
   }
 
+  private validateDataSourceCollisions(): void {
+    if (this._imports.length === 0) {
+      return;
+    }
+
+    const parentKeys = dataSourceKeysForComponent(this._dataSources, this._dataSourceOverrides);
+    const overrideKeys = new Set(
+      this._dataSourceOverrides.map((ds) => resolveDataSourceKey(ds))
+    );
+    const siblingKeys = new Map<string, string>();
+    const warned = new Set<string>();
+
+    for (const { component } of this._imports) {
+      const importKeys = collectImportDataSourceKeys(component);
+      for (const dsKey of importKeys) {
+        if (parentKeys.has(dsKey) && !overrideKeys.has(dsKey) && !warned.has(dsKey)) {
+          warned.add(dsKey);
+          console.warn(
+            `GraphQLComponent "${this.name}": data source key "${dsKey}" is defined on this component and on an import; ` +
+            'the parent instance wins at runtime. Use dataSourceOverrides to replace an import data source intentionally.'
+          );
+        }
+
+        const prior = siblingKeys.get(dsKey);
+        if (prior && prior !== component.name && !warned.has(`sibling:${dsKey}`)) {
+          warned.add(`sibling:${dsKey}`);
+          console.warn(
+            `GraphQLComponent "${this.name}": data source key "${dsKey}" is defined by multiple imports; ` +
+            'the first import in the imports array wins at runtime.'
+          );
+        }
+        else if (!prior) {
+          siblingKeys.set(dsKey, component.name);
+        }
+      }
+    }
+  }
+
 }
 
 // For backward compatibility with CommonJS require()
 module.exports = GraphQLComponent;
 module.exports.default = GraphQLComponent;
+
+const minifiedNameWarnings = new Set<string>();
+
+function warnMinifiedConstructorName(name: string): void {
+  if (minifiedNameWarnings.has(name)) {
+    return;
+  }
+  minifiedNameWarnings.add(name);
+  console.warn(
+    `GraphQLComponent: constructor.name "${name}" looks minified; set the explicit "name" option for stable component and data source keys.`
+  );
+}
+
+function resolveDataSourceKey(dataSource: IDataSource): string {
+  return dataSource.name != null && dataSource.name !== ''
+    ? dataSource.name
+    : dataSource.constructor.name;
+}
+
+function dataSourceKeysForComponent(dataSources: IDataSource[], overrides: IDataSource[]): Set<string> {
+  const keys = new Set<string>();
+  for (const ds of dataSources) {
+    keys.add(resolveDataSourceKey(ds));
+  }
+  for (const ds of overrides) {
+    keys.add(resolveDataSourceKey(ds));
+  }
+  return keys;
+}
+
+function collectImportDataSourceKeys(component: IGraphQLComponent): Set<string> {
+  const keys = dataSourceKeysForComponent(component.dataSources || [], component.dataSourceOverrides || []);
+  for (const imp of component.imports || []) {
+    const nested = collectImportDataSourceKeys('component' in imp ? imp.component : imp);
+    for (const key of nested) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+
+function inferRootQueryTypeName(types: TypeSource): string {
+  const sources = Array.isArray(types) ? types : [types];
+  for (const source of sources) {
+    if (typeof source !== 'string') {
+      continue;
+    }
+    const match = source.match(/schema\s*\{[^}]*\bquery\s*:\s*(\w+)/i);
+    if (match) {
+      return match[1];
+    }
+  }
+  return 'Query';
+}
+
+function contextForDataSourceInjection(ctx: Record<string, unknown>): Record<string, unknown> {
+  const clone = { ...ctx };
+  delete clone.dataSources;
+  return clone;
+}
+
+function mergeImportedTopLevelContext(
+  target: Record<string, unknown>,
+  imported: ComponentContext,
+  componentName: string,
+  warnedCollisions: Set<string>
+): void {
+  for (const [key, value] of Object.entries(imported)) {
+    if (key === 'dataSources') {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(target, key)) {
+      if (!warnedCollisions.has(`ctx:${key}`)) {
+        warnedCollisions.add(`ctx:${key}`);
+        console.warn(
+          `GraphQLComponent "${componentName}": top-level context key "${key}" from an import was ignored because the parent context already defines it.`
+        );
+      }
+      continue;
+    }
+    target[key] = value;
+  }
+}
+
+function mergeImportedDataSources(
+  target: DataSourceMap,
+  imported: DataSourceMap,
+  componentName: string,
+  warnedCollisions: Set<string>
+): void {
+  for (const [dsName, ds] of Object.entries(imported)) {
+    if (Object.prototype.hasOwnProperty.call(target, dsName)) {
+      if (!warnedCollisions.has(`ds:${dsName}`)) {
+        warnedCollisions.add(`ds:${dsName}`);
+        console.warn(
+          `GraphQLComponent "${componentName}": data source "${dsName}" from an import was ignored because the parent already defines it.`
+        );
+      }
+      continue;
+    }
+    target[dsName] = ds;
+  }
+}
 
 /**
  * Wraps data sources with a proxy that intercepts calls to data source methods and injects the current context
@@ -576,7 +711,7 @@ const memoize = function (parentType: string, fieldName: string, resolve: Resolv
 
     let cached = _cache.get(context);
 
-    if (cached && cached[key]) {
+    if (cached && Object.prototype.hasOwnProperty.call(cached, key)) {
       return cached[key];
     }
 
@@ -602,7 +737,11 @@ const memoize = function (parentType: string, fieldName: string, resolve: Resolv
  * @returns {Object} - an object identical in structure to the input resolver
  * map, except with resolver function bound to the input argument bind
  */
-const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IResolvers = {}): IResolvers {
+const bindResolvers = function (
+  bindContext: IGraphQLComponent,
+  resolvers: IResolvers = {},
+  rootQueryTypeName = 'Query'
+): IResolvers {
   const boundResolvers: Record<string, Record<string, unknown> | GraphQLScalarType> = {};
 
   for (const [type, fields] of Object.entries(resolvers)) {
@@ -620,7 +759,7 @@ const bindResolvers = function (bindContext: IGraphQLComponent, resolvers: IReso
 
     for (const [field, resolver] of Object.entries(fields)) {
       if (typeof resolver === 'function') {
-        if (type === 'Query') {
+        if (type === rootQueryTypeName) {
           typeResolvers[field] = memoize(type, field, resolver.bind(bindContext));
         }
         else {

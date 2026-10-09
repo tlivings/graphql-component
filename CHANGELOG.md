@@ -1,3 +1,20 @@
+### v7.0.0
+
+- [BREAKING] Context pipeline order: middleware and namespace run before data source proxies are built. Data sources now receive middleware and namespace values; middleware no longer receives injected `dataSources` (use the returned context after `await component.context()` for data source access in middleware-style flows).
+- [BREAKING] Import precedence: parent top-level context keys and data source keys win over imports. Sibling import data source key collisions warn at construction; the first import in the array wins at runtime (previously the last import could overwrite silently).
+- [BREAKING] Namespace context is assigned as a fresh object per request under the configured namespace key, avoiding in-place mutation races between parallel imports.
+- [FIX] Removed duplicate per-request injection of imported data sources (import data sources are merged only via each import’s context function).
+- [FIX] Schema `transforms` mappers of the same kind now chain, with each mapper receiving the previous mapper’s result.
+- [FIX] Query resolver memoization caches falsy return values and applies to the schema root query type (including custom `schema { query: ... }` names), not only a type literally named `Query`.
+- [FEATURE] Optional `name` constructor option for stable component naming when `constructor.name` is minified (warns when the inferred name is 1–2 characters).
+
+#### Migration
+
+- If middleware relied on `context.dataSources` during the middleware chain, move that logic to run after `await component.context()` or use resolvers/data sources that read the finished context.
+- If you depended on imports overwriting parent data sources or top-level context keys, use `dataSourceOverrides` or rename keys / namespaces explicitly.
+- If sibling imports shared a data source key and you depended on the last import winning, reorder `imports` so the intended component is first or rename data sources.
+- Set `name` on components in minified production bundles for stable logging and collision warnings.
+
 ### v6.0.3
 
 - [FIX] Import handling now supports both `GraphQLComponent` instances and custom `IGraphQLComponent` implementations, not just class instances
