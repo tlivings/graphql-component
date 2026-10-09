@@ -1,7 +1,7 @@
-import { buildFederatedSchema } from '@apollo/federation';
+import { buildSubgraphSchema } from '@apollo/subgraph';
 import { DocumentNode, GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema, print } from 'graphql';
 
-import { mergeTypeDefs } from '@graphql-tools/merge';
+import { mergeResolvers, mergeTypeDefs } from '@graphql-tools/merge';
 import {
   pruneSchema,
   IResolvers,
@@ -200,6 +200,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
     this.validateDataSourceCollisions();
 
+    this.validateFederationImports();
+
   }
 
   get disposed(): boolean {
@@ -313,18 +315,11 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         return this._schema;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let makeSchema: (schemaConfig: any) => GraphQLSchema;
-
-      if (this._federation) {
-        makeSchema = buildFederatedSchema;
+      if (this._federation && this._imports.length > 0) {
+        const merged = collectFederationTypeDefsAndResolvers(this);
+        this._schema = buildComponentSubgraphSchema(merged.typeDefs, merged.resolvers);
       }
-      else {
-        makeSchema = makeExecutableSchema;
-      }
-
-      if (this._imports.length > 0) {
-        // iterate through the imports and construct subschema configuration objects
+      else if (this._imports.length > 0) {
         const subschemas = this._imports.map((imp) => {
           const { component, configuration = {} } = imp;
 
@@ -334,8 +329,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
           };
         });
 
-        // construct an aggregate schema from the schemas of imported
-        // components and this component's types/resolvers (if present)
         this._schema = stitchSchemas({
           subschemas,
           typeDefs: this._types,
@@ -343,13 +336,17 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
           mergeDirectives: true
         });
       }
+      else if (this._federation) {
+        this._schema = buildComponentSubgraphSchema(this._types, this._resolvers);
+      }
       else {
-        const schemaConfig = {
-          typeDefs: !this._federation && Array.isArray(this._types) && this._types.length === 1 ? this._types[0] : mergeTypeDefs(this._types),
-          resolvers: this._resolvers
-        };
-
-        this._schema = makeSchema(schemaConfig);
+        const typeDefs = Array.isArray(this._types) && this._types.length === 1
+          ? this._types[0]
+          : mergeTypeDefs(this._types);
+        this._schema = makeExecutableSchema({
+          typeDefs,
+          resolvers: this._resolvers as IResolvers
+        });
       }
 
       if (this._transforms) {
@@ -496,6 +493,16 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     }
   }
 
+  private validateFederationImports(): void {
+    if (!this._federation || this._imports.length === 0) {
+      return;
+    }
+
+    for (const imp of this._imports) {
+      assertFederationImportSupported(this.name, imp);
+    }
+  }
+
   private validateDataSourceCollisions(): void {
     if (this._imports.length === 0) {
       return;
@@ -602,6 +609,102 @@ function effectiveDataSourceConstructorMap(component: IGraphQLComponent): Map<st
   }
 
   return map;
+}
+
+const FEDERATION_UNSUPPORTED_IMPORT_CONFIG_KEYS = new Set([
+  'schema',
+  'executor',
+  'endpoint',
+  'transforms',
+  'merge',
+  'mergeTypes',
+  'createProxyingResolver',
+  'batch',
+  'subscriber',
+  'gatewayExecutor'
+]);
+
+function normalizeImportEntry(entry: IGraphQLComponent | IGraphQLComponentConfigObject): IGraphQLComponentConfigObject {
+  return 'component' in entry && entry.component ? entry as IGraphQLComponentConfigObject : { component: entry as IGraphQLComponent };
+}
+
+function assertFederationImportSupported(ownerName: string, imp: IGraphQLComponentConfigObject): void {
+  const { component, configuration = {} } = imp;
+
+  for (const key of Object.keys(configuration)) {
+    if (FEDERATION_UNSUPPORTED_IMPORT_CONFIG_KEYS.has(key)) {
+      throw new Error(
+        `GraphQLComponent "${ownerName}": federation with imports does not support import configuration.${key} ` +
+        '(remote schemas, executable schema overrides, transforms, and schema stitching are not supported).'
+      );
+    }
+  }
+
+  if (!(component instanceof GraphQLComponent)) {
+    throw new Error(
+      `GraphQLComponent "${ownerName}": federation with imports requires each imported component to be a GraphQLComponent instance ` +
+      'so type definitions and resolvers can be merged locally.'
+    );
+  }
+
+  for (const nested of component.imports || []) {
+    assertFederationImportSupported(ownerName, normalizeImportEntry(nested));
+  }
+}
+
+function buildComponentSubgraphSchema(types: TypeSource | DocumentNode, resolvers: IResolvers): GraphQLSchema {
+  const typeDefs = normalizeTypeDefs(types);
+  // buildSubgraphSchema resolver map types are narrower than graphql-tools IResolvers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return buildSubgraphSchema([{ typeDefs, resolvers: resolvers as any }]);
+}
+
+function normalizeTypeDefs(types: TypeSource | DocumentNode): DocumentNode {
+  if (typeof types === 'object' && types !== null && 'kind' in types && (types as DocumentNode).kind === 'Document') {
+    return types as DocumentNode;
+  }
+  if (Array.isArray(types)) {
+    if (types.length === 0) {
+      throw new Error('Cannot build schema without type definitions');
+    }
+    return types.length === 1 && typeof types[0] !== 'string' && (types[0] as DocumentNode).kind === 'Document'
+      ? types[0] as DocumentNode
+      : mergeTypeDefs(types);
+  }
+  if (typeof types === 'string') {
+    return mergeTypeDefs([types]);
+  }
+  return types as DocumentNode;
+}
+
+function collectFederationTypeDefsAndResolvers(component: GraphQLComponent): { typeDefs: DocumentNode; resolvers: IResolvers } {
+  const typeSources: TypeSource[] = [];
+  const resolverMaps: IResolvers[] = [];
+
+  const ownTypes = component.types;
+  if (Array.isArray(ownTypes)) {
+    typeSources.push(...ownTypes);
+  }
+  else if (ownTypes) {
+    typeSources.push(ownTypes);
+  }
+
+  if (component.resolvers && Object.keys(component.resolvers).length > 0) {
+    resolverMaps.push(component.resolvers);
+  }
+
+  for (const imp of component.imports || []) {
+    const entry = normalizeImportEntry(imp);
+    const child = entry.component as GraphQLComponent;
+    const mergedChild = collectFederationTypeDefsAndResolvers(child);
+    typeSources.push(mergedChild.typeDefs);
+    resolverMaps.push(mergedChild.resolvers);
+  }
+
+  return {
+    typeDefs: mergeTypeDefs(typeSources),
+    resolvers: resolverMaps.length === 0 ? {} : mergeResolvers(resolverMaps)
+  };
 }
 
 function typeSourceToSdl(source: unknown): string | null {

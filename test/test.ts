@@ -176,7 +176,7 @@ test('federation', (t) => {
       t.plan(1);
       t.doesNotThrow(() => {
         component.schema;
-      }, 'can return a buildFederatedSchema schema');
+      }, 'can return a buildSubgraphSchema schema');
     });
   
     t.test('custom directive added to federated schema', (t) => {

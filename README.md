@@ -182,7 +182,18 @@ const component = new GraphQLComponent({
 });
 ```
 
-This switches schema construction from `makeExecutableSchema()` to `buildFederatedSchema()`. The federation flag is per-component; a parent does not propagate it to imported children.
+This switches schema construction from `makeExecutableSchema()` to `@apollo/subgraph` `buildSubgraphSchema()`. Federation 1 SDL (legacy `@key` / `@extends` without `@link`) and Federation 2 (`extend schema @link(...)`) are both supported. The federation flag is per-component; a parent does not propagate it to imported children.
+
+### Federation with imports
+
+When a federated component lists `imports`, locally mergeable child components (each a `GraphQLComponent` whose types and resolvers can be combined without stitching) are merged and passed to `buildSubgraphSchema` as one subgraph. Entity resolvers such as `__resolveReference` on imported components are included in the merged schema, and the result exposes `_service` / `_entities` like a standalone subgraph.
+
+Unsupported import shapes fail at construction with an explicit error (no silent fallback):
+
+- Import `configuration` that sets `schema`, `executor`, `endpoint`, `transforms`, or other stitching/remote options
+- Imported components that are not `GraphQLComponent` instances (custom `IGraphQLComponent` implementations cannot be merged for federation)
+
+Use schema stitching (`federation: false`) when you need remote subschemas, executable schema overrides, or per-import transforms.
 
 ## Mocking
 
