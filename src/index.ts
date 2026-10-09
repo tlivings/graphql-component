@@ -1,7 +1,7 @@
-import { buildFederatedSchema } from '@apollo/federation';
+import { buildSubgraphSchema } from '@apollo/subgraph';
 import { DocumentNode, GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema, print } from 'graphql';
 
-import { mergeTypeDefs } from '@graphql-tools/merge';
+import { mergeResolvers, mergeTypeDefs } from '@graphql-tools/merge';
 import {
   pruneSchema,
   IResolvers,
@@ -14,6 +14,8 @@ import { makeExecutableSchema } from '@graphql-tools/schema';
 import { stitchSchemas } from '@graphql-tools/stitch';
 import { addMocksToSchema, IMocks } from '@graphql-tools/mock';
 import { SubschemaConfig } from '@graphql-tools/delegate';
+
+export const GRAPHQL_COMPONENT_BRAND = Symbol.for('graphql-component');
 
 export type ResolverFunction = (_: any, args: any, ctx: any, info: GraphQLResolveInfo) => any;
 
@@ -196,9 +198,18 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
     this._contextConfig = context;
 
+    Object.defineProperty(this, GRAPHQL_COMPONENT_BRAND, {
+      value: true,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    });
+
     this.validateConfig({ types, imports, mocks, federation, context, transforms });
 
     this.validateDataSourceCollisions();
+
+    this.validateFederationImports();
 
   }
 
@@ -313,18 +324,11 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         return this._schema;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let makeSchema: (schemaConfig: any) => GraphQLSchema;
-
-      if (this._federation) {
-        makeSchema = buildFederatedSchema;
+      if (this._federation && this._imports.length > 0) {
+        const merged = collectFederationTypeDefsAndResolvers(this);
+        this._schema = buildComponentSubgraphSchema(merged.typeDefs, merged.resolvers);
       }
-      else {
-        makeSchema = makeExecutableSchema;
-      }
-
-      if (this._imports.length > 0) {
-        // iterate through the imports and construct subschema configuration objects
+      else if (this._imports.length > 0) {
         const subschemas = this._imports.map((imp) => {
           const { component, configuration = {} } = imp;
 
@@ -334,8 +338,6 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
           };
         });
 
-        // construct an aggregate schema from the schemas of imported
-        // components and this component's types/resolvers (if present)
         this._schema = stitchSchemas({
           subschemas,
           typeDefs: this._types,
@@ -343,13 +345,17 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
           mergeDirectives: true
         });
       }
+      else if (this._federation) {
+        this._schema = buildComponentSubgraphSchema(this._types, this._resolvers);
+      }
       else {
-        const schemaConfig = {
-          typeDefs: !this._federation && Array.isArray(this._types) && this._types.length === 1 ? this._types[0] : mergeTypeDefs(this._types),
-          resolvers: this._resolvers
-        };
-
-        this._schema = makeSchema(schemaConfig);
+        const typeDefs = Array.isArray(this._types) && this._types.length === 1
+          ? this._types[0]
+          : mergeTypeDefs(this._types);
+        this._schema = makeExecutableSchema({
+          typeDefs,
+          resolvers: this._resolvers as IResolvers
+        });
       }
 
       if (this._transforms) {
@@ -496,6 +502,72 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     }
   }
 
+  private validateFederationImports(): void {
+    if (!this._federation || this._imports.length === 0) {
+      return;
+    }
+
+    const resolveReferenceOwners = new Map<string, string>();
+    this.registerFederationResolveReferenceOwners(this.name, resolveReferenceOwners);
+
+    const federationLinkUrls: string[] = [];
+    collectFederationLinkUrlsFromTypes(this._types, federationLinkUrls);
+
+    for (const imp of this._imports) {
+      this.validateFederationImportEntry(this.name, imp, resolveReferenceOwners, federationLinkUrls);
+    }
+
+    assertCompatibleFederationLinkUrls(this.name, federationLinkUrls);
+  }
+
+  private validateFederationImportEntry(
+    ownerName: string,
+    imp: IGraphQLComponentConfigObject,
+    resolveReferenceOwners: Map<string, string>,
+    federationLinkUrls: string[]
+  ): void {
+    const { component, configuration = {} } = imp;
+    const configurationKeys = Object.keys(configuration);
+    if (configurationKeys.length > 0) {
+      throw new Error(
+        `GraphQLComponent "${ownerName}": federation with imports does not support import configuration ` +
+        `(found "${configurationKeys[0]}"). The federated merge path ignores SubschemaConfig; use non-federated stitching instead.`
+      );
+    }
+
+    const branded = requireGraphQLComponentBrand(ownerName, component);
+
+    this.assertFederationImportComponentOptions(ownerName, branded);
+
+    branded.registerFederationResolveReferenceOwners(ownerName, resolveReferenceOwners);
+    collectFederationLinkUrlsFromTypes(branded._types, federationLinkUrls);
+
+    for (const nested of branded._imports) {
+      this.validateFederationImportEntry(ownerName, nested, resolveReferenceOwners, federationLinkUrls);
+    }
+  }
+
+  private assertFederationImportComponentOptions(ownerName: string, component: GraphQLComponent): void {
+    if (component._transforms && component._transforms.length > 0) {
+      throw new Error(
+        `GraphQLComponent "${ownerName}": federation with imports does not support schema transforms on imported component "${component.name}".`
+      );
+    }
+
+    if (component._mocks === true || (component._mocks && typeof component._mocks === 'object')) {
+      throw new Error(
+        `GraphQLComponent "${ownerName}": federation with imports does not support mocks on imported component "${component.name}".`
+      );
+    }
+  }
+
+  private registerFederationResolveReferenceOwners(
+    ownerName: string,
+    resolveReferenceOwners: Map<string, string>
+  ): void {
+    registerResolveReferenceCollisions(ownerName, this._resolvers, this.name, resolveReferenceOwners);
+  }
+
   private validateDataSourceCollisions(): void {
     if (this._imports.length === 0) {
       return;
@@ -602,6 +674,131 @@ function effectiveDataSourceConstructorMap(component: IGraphQLComponent): Map<st
   }
 
   return map;
+}
+
+const FEDERATION_LINK_URL_PATTERN = /@link\s*\(\s*url\s*:\s*["']([^"']+)["']/gi;
+
+function normalizeImportEntry(entry: IGraphQLComponent | IGraphQLComponentConfigObject): IGraphQLComponentConfigObject {
+  return 'component' in entry && entry.component ? entry as IGraphQLComponentConfigObject : { component: entry as IGraphQLComponent };
+}
+
+function isGraphQLComponentBrand(value: unknown): value is GraphQLComponent {
+  return typeof value === 'object'
+    && value !== null
+    && (value as Record<symbol, unknown>)[GRAPHQL_COMPONENT_BRAND] === true;
+}
+
+function requireGraphQLComponentBrand(ownerName: string, component: IGraphQLComponent): GraphQLComponent {
+  if (!isGraphQLComponentBrand(component)) {
+    throw new Error(
+      `GraphQLComponent "${ownerName}": federation with imports requires each imported component to be a GraphQLComponent ` +
+      'from this library so type definitions and resolvers can be merged locally.'
+    );
+  }
+  return component;
+}
+
+function collectFederationLinkUrlsFromTypes(types: TypeSource, urls: string[]): void {
+  const sources = Array.isArray(types) ? types : types ? [types] : [];
+  for (const source of sources) {
+    const sdl = typeSourceToSdl(source);
+    if (!sdl) {
+      continue;
+    }
+    for (const match of sdl.matchAll(FEDERATION_LINK_URL_PATTERN)) {
+      urls.push(match[1]);
+    }
+  }
+}
+
+function assertCompatibleFederationLinkUrls(ownerName: string, urls: string[]): void {
+  const federationUrls = urls.filter((url) => url.includes('specs.apollo.dev/federation'));
+  const unique = [...new Set(federationUrls)];
+  if (unique.length > 1) {
+    throw new Error(
+      `GraphQLComponent "${ownerName}": federation merge combines incompatible federation @link URLs (${unique.join(', ')}). ` +
+      'Use a single federation version across merged components.'
+    );
+  }
+}
+
+function registerResolveReferenceCollisions(
+  ownerName: string,
+  resolvers: IResolvers,
+  componentName: string,
+  resolveReferenceOwners: Map<string, string>
+): void {
+  for (const [typeName, typeResolvers] of Object.entries(resolvers || {})) {
+    if (!typeResolvers || typeof typeResolvers !== 'object') {
+      continue;
+    }
+    if (!('__resolveReference' in typeResolvers)) {
+      continue;
+    }
+    const priorOwner = resolveReferenceOwners.get(typeName);
+    if (priorOwner) {
+      throw new Error(
+        `GraphQLComponent "${ownerName}": multiple merged components define __resolveReference for "${typeName}" ` +
+        `(first "${priorOwner}", also "${componentName}").`
+      );
+    }
+    resolveReferenceOwners.set(typeName, componentName);
+  }
+}
+
+function buildComponentSubgraphSchema(types: TypeSource | DocumentNode, resolvers: IResolvers): GraphQLSchema {
+  const typeDefs = normalizeTypeDefs(types);
+  // buildSubgraphSchema resolver map types are narrower than graphql-tools IResolvers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return buildSubgraphSchema([{ typeDefs, resolvers: resolvers as any }]);
+}
+
+function normalizeTypeDefs(types: TypeSource | DocumentNode): DocumentNode {
+  if (typeof types === 'object' && types !== null && 'kind' in types && (types as DocumentNode).kind === 'Document') {
+    return types as DocumentNode;
+  }
+  if (Array.isArray(types)) {
+    if (types.length === 0) {
+      throw new Error('Cannot build schema without type definitions');
+    }
+    return types.length === 1 && typeof types[0] !== 'string' && (types[0] as DocumentNode).kind === 'Document'
+      ? types[0] as DocumentNode
+      : mergeTypeDefs(types);
+  }
+  if (typeof types === 'string') {
+    return mergeTypeDefs([types]);
+  }
+  return types as DocumentNode;
+}
+
+function collectFederationTypeDefsAndResolvers(component: GraphQLComponent): { typeDefs: DocumentNode; resolvers: IResolvers } {
+  const typeSources: TypeSource[] = [];
+  const resolverMaps: IResolvers[] = [];
+
+  const ownTypes = component.types;
+  if (Array.isArray(ownTypes)) {
+    typeSources.push(...ownTypes);
+  }
+  else if (ownTypes) {
+    typeSources.push(ownTypes);
+  }
+
+  if (component.resolvers && Object.keys(component.resolvers).length > 0) {
+    resolverMaps.push(component.resolvers);
+  }
+
+  for (const imp of component.imports || []) {
+    const entry = normalizeImportEntry(imp);
+    const child = requireGraphQLComponentBrand(component.name, entry.component);
+    const mergedChild = collectFederationTypeDefsAndResolvers(child);
+    typeSources.push(mergedChild.typeDefs);
+    resolverMaps.push(mergedChild.resolvers);
+  }
+
+  return {
+    typeDefs: mergeTypeDefs(typeSources),
+    resolvers: resolverMaps.length === 0 ? {} : mergeResolvers(resolverMaps)
+  };
 }
 
 function typeSourceToSdl(source: unknown): string | null {

@@ -7,6 +7,9 @@
 - [FIX] Schema `transforms` mappers of the same kind now chain, with each mapper receiving the previous mapper’s result.
 - [FIX] Query resolver memoization caches falsy return values and applies to the schema root query type (including custom `schema { query: ... }` names), not only a type literally named `Query`.
 - [FEATURE] Optional `name` constructor option for stable component naming when `constructor.name` is minified (warns when the inferred name is 1–2 characters).
+- [BREAKING] Replaced deprecated `@apollo/federation` with `@apollo/subgraph` (`buildSubgraphSchema`, `^2.15.1`). Federation 2 `@link` SDL is supported; Federation 1 SDL without `@link` continues to work.
+- [BREAKING] **Node.js >= 22** is required (`engines.node` and CI on Node 22/24).
+- [BREAKING] `federation: true` with `imports` now merges branded `GraphQLComponent` definitions into one subgraph (including `__resolveReference`) instead of silently omitting `_service`. Any non-empty import `configuration` throws at construction (first key reported). Imported `transforms`/`mocks`, duplicate `__resolveReference` for the same type, and incompatible federation `@link` URLs across merges also throw at construction.
 
 #### Migration
 
@@ -14,6 +17,13 @@
 - If you depended on imports overwriting parent data sources or top-level context keys, use `dataSourceOverrides` or rename keys / namespaces explicitly.
 - Sibling imports with the same data source key now throw at construction when implementations differ; use `dataSourceOverrides` on the parent or align implementations (same class) / rename keys.
 - Set `name` on components in minified production bundles for stable logging and collision warnings.
+- Remove `@apollo/federation` from your app dependencies; use `@apollo/subgraph` (pulled in by this package) for any direct subgraph utilities.
+- Federated components with imports that relied on stitched remote subschemas must use non-federated stitching at the gateway boundary, or colocate mergeable subgraph SDL on branded `GraphQLComponent` imports only.
+- Federated merge rejects any import `configuration` (not a blocklist): use non-federated stitching for `SubschemaConfig` options such as `executor`, `schema`, or `transforms`.
+- Do not put `transforms` or `mocks` on imported components in a federated merge; apply them on the root federated component or use non-federated stitching.
+- Align on one federation `@link` version across merged components, or use Fed 1 SDL without `@link` alongside a single Fed 2 `@link`.
+- Only one imported component may define `__resolveReference` per entity type.
+- Upgrade runtime to **Node 22+** before adopting v7 (required by `@apollo/subgraph` 2.15+).
 
 ### v6.0.3
 
