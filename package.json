@@ -34,11 +34,8 @@
   "author": "Trevor Livingston <tlivings@gmail.com>",
   "repository": "https://github.com/ExpediaGroup/graphql-component",
   "license": "MIT",
-  "_dependencyNotes": {
-    "@apollo/subgraph": "~2.14.4 — @apollo/subgraph 2.15+ requires Node 22; 2.14.x supports Node 18+"
-  },
   "dependencies": {
-    "@apollo/subgraph": "~2.14.4",
+    "@apollo/subgraph": "^2.15.1",
     "@graphql-tools/delegate": "^10.2.0",
     "@graphql-tools/merge": "^9.0.9",
     "@graphql-tools/mock": "^9.0.6",
@@ -88,6 +85,6 @@
     "all": true
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }

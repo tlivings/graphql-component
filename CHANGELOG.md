@@ -7,7 +7,8 @@
 - [FIX] Schema `transforms` mappers of the same kind now chain, with each mapper receiving the previous mapper’s result.
 - [FIX] Query resolver memoization caches falsy return values and applies to the schema root query type (including custom `schema { query: ... }` names), not only a type literally named `Query`.
 - [FEATURE] Optional `name` constructor option for stable component naming when `constructor.name` is minified (warns when the inferred name is 1–2 characters).
-- [BREAKING] Replaced deprecated `@apollo/federation` with `@apollo/subgraph` (`buildSubgraphSchema`). Federation 2 `@link` SDL is supported; Federation 1 SDL without `@link` continues to work. Dependency pinned to `@apollo/subgraph` ~2.14.x because 2.15+ requires Node 22; **this package remains Node >= 18**.
+- [BREAKING] Replaced deprecated `@apollo/federation` with `@apollo/subgraph` (`buildSubgraphSchema`, `^2.15.1`). Federation 2 `@link` SDL is supported; Federation 1 SDL without `@link` continues to work.
+- [BREAKING] **Node.js >= 22** is required (`engines.node` and CI on Node 22/24).
 - [BREAKING] `federation: true` with `imports` now merges branded `GraphQLComponent` definitions into one subgraph (including `__resolveReference`) instead of silently omitting `_service`. Any non-empty import `configuration` throws at construction (first key reported). Imported `transforms`/`mocks`, duplicate `__resolveReference` for the same type, and incompatible federation `@link` URLs across merges also throw at construction.
 
 #### Migration
@@ -22,7 +23,7 @@
 - Do not put `transforms` or `mocks` on imported components in a federated merge; apply them on the root federated component or use non-federated stitching.
 - Align on one federation `@link` version across merged components, or use Fed 1 SDL without `@link` alongside a single Fed 2 `@link`.
 - Only one imported component may define `__resolveReference` per entity type.
-- Direct `@apollo/subgraph` usage in apps on Node 18–21 should stay on 2.14.x; Node 22+ can use newer `@apollo/subgraph` releases independently of this pin.
+- Upgrade runtime to **Node 22+** before adopting v7 (required by `@apollo/subgraph` 2.15+).
 
 ### v6.0.3
 
