@@ -190,8 +190,13 @@ When a federated component lists `imports`, locally mergeable child components (
 
 Unsupported import shapes fail at construction with an explicit error (no silent fallback):
 
-- Import `configuration` that sets `schema`, `executor`, `endpoint`, `transforms`, or other stitching/remote options
-- Imported components that are not `GraphQLComponent` instances (custom `IGraphQLComponent` implementations cannot be merged for federation)
+- Any non-empty import `configuration` (the federated merge path never reads `SubschemaConfig`; the first key found is reported)
+- Imported components that are not branded `GraphQLComponent` instances from this library (custom `IGraphQLComponent` implementations cannot be merged for federation)
+- Schema `transforms` or `mocks` on an imported component at any depth
+- Multiple merged components defining `__resolveReference` for the same GraphQL type
+- Incompatible Federation `@link` URLs across merged components (identical federation `@link` URLs are allowed; Federation 1 SDL without `@link` can be mixed with a single Fed 2 `@link`)
+
+**Node.js:** this library supports Node **>= 18**. It depends on `@apollo/subgraph` **~2.14.x** because `@apollo/subgraph` 2.15+ requires Node 22.
 
 Use schema stitching (`federation: false`) when you need remote subschemas, executable schema overrides, or per-import transforms.
 
