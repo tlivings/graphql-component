@@ -271,7 +271,7 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
 
       const dataSources: DataSourceMap = Object.assign({}, localDataSources);
       for (const imported of importResults) {
-        mergeImportedDataSources(dataSources, imported.dataSources || {}, this.name, warnedTopLevelCollisions);
+        mergeImportedDataSources(dataSources, imported.dataSources || {});
       }
 
       return Object.assign({}, ctx, { dataSources }) as ComponentContext;
@@ -509,8 +509,8 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
     const warned = new Set<string>();
 
     for (const { component } of this._imports) {
-      const importKeys = collectImportDataSourceKeys(component);
-      for (const dsKey of importKeys) {
+      const effectiveConstructors = effectiveDataSourceConstructorMap(component);
+      for (const dsKey of effectiveConstructors.keys()) {
         if (parentKeys.has(dsKey) && !overrideKeys.has(dsKey) && !warned.has(dsKey)) {
           warned.add(dsKey);
           console.warn(
@@ -520,17 +520,16 @@ export default class GraphQLComponent<TContextType extends ComponentContext = Co
         }
       }
 
-      for (const dataSource of component.dataSources || []) {
-        const dsKey = resolveDataSourceKey(dataSource);
+      for (const [dsKey, ctor] of effectiveConstructors) {
         const prior = siblingByKey.get(dsKey);
         if (!prior) {
-          siblingByKey.set(dsKey, { component, ctor: dataSource.constructor });
+          siblingByKey.set(dsKey, { component, ctor });
           continue;
         }
         if (prior.component === component) {
           continue;
         }
-        if (prior.ctor === dataSource.constructor) {
+        if (prior.ctor === ctor) {
           continue;
         }
         if (!overrideKeys.has(dsKey)) {
@@ -578,15 +577,31 @@ function dataSourceKeysForComponent(dataSources: IDataSource[], overrides: IData
   return keys;
 }
 
-function collectImportDataSourceKeys(component: IGraphQLComponent): Set<string> {
-  const keys = dataSourceKeysForComponent(component.dataSources || [], component.dataSourceOverrides || []);
+function importConfigComponent(entry: IGraphQLComponent | IGraphQLComponentConfigObject): IGraphQLComponent {
+  return 'component' in entry ? entry.component : entry;
+}
+
+function effectiveDataSourceConstructorMap(component: IGraphQLComponent): Map<string, IDataSource['constructor']> {
+  const map = new Map<string, IDataSource['constructor']>();
+
+  for (const dataSource of component.dataSources || []) {
+    map.set(resolveDataSourceKey(dataSource), dataSource.constructor);
+  }
+
+  for (const dataSourceOverride of component.dataSourceOverrides || []) {
+    map.set(resolveDataSourceKey(dataSourceOverride), dataSourceOverride.constructor);
+  }
+
   for (const imp of component.imports || []) {
-    const nested = collectImportDataSourceKeys('component' in imp ? imp.component : imp);
-    for (const key of nested) {
-      keys.add(key);
+    const childMap = effectiveDataSourceConstructorMap(importConfigComponent(imp));
+    for (const [key, ctor] of childMap) {
+      if (!map.has(key)) {
+        map.set(key, ctor);
+      }
     }
   }
-  return keys;
+
+  return map;
 }
 
 function typeSourceToSdl(source: unknown): string | null {
@@ -645,23 +660,11 @@ function mergeImportedTopLevelContext(
   }
 }
 
-function mergeImportedDataSources(
-  target: DataSourceMap,
-  imported: DataSourceMap,
-  componentName: string,
-  warnedCollisions: Set<string>
-): void {
+function mergeImportedDataSources(target: DataSourceMap, imported: DataSourceMap): void {
   for (const [dsName, ds] of Object.entries(imported)) {
-    if (Object.prototype.hasOwnProperty.call(target, dsName)) {
-      if (!warnedCollisions.has(`ds:${dsName}`)) {
-        warnedCollisions.add(`ds:${dsName}`);
-        console.warn(
-          `GraphQLComponent "${componentName}": data source "${dsName}" from an import was ignored because the parent already defines it.`
-        );
-      }
-      continue;
+    if (!Object.prototype.hasOwnProperty.call(target, dsName)) {
+      target[dsName] = ds;
     }
-    target[dsName] = ds;
   }
 }
 

@@ -327,6 +327,85 @@ test('Composition regression (v7 context, transforms, memoize)', (t) => {
     assert.end();
   });
 
+  t.test('cousin imports with different data source implementations throw at parent construction', (assert) => {
+    class XA {
+      name = 'shared';
+      tag = 'xa';
+    }
+    class XB {
+      name = 'shared';
+      tag = 'xb';
+    }
+
+    const a1 = new GraphQLComponent({
+      name: 'A1',
+      types: 'type Query { a1: String }',
+      dataSources: [new XA()]
+    });
+    const b1 = new GraphQLComponent({
+      name: 'B1',
+      types: 'type Query { b1: String }',
+      dataSources: [new XB()]
+    });
+
+    const importA = new GraphQLComponent({
+      name: 'A',
+      types: 'type Query { a: String }',
+      imports: [a1]
+    });
+    const importB = new GraphQLComponent({
+      name: 'B',
+      types: 'type Query { b: String }',
+      imports: [b1]
+    });
+
+    assert.throws(() => {
+      new GraphQLComponent({
+        name: 'P',
+        types: 'type Query { p: String }',
+        imports: [importA, importB]
+      });
+    }, /different implementations/, 'parent detects cousin data source key collision');
+    assert.end();
+  });
+
+  t.test('sibling imports with same data source class merge context without runtime warnings', async (assert) => {
+    class SharedDS {
+      name = 'shared';
+      tag: string;
+      constructor(tag: string) {
+        this.tag = tag;
+      }
+      getTag() {
+        return this.tag;
+      }
+    }
+
+    const comp1 = new GraphQLComponent({
+      name: 'CompOne',
+      types: 'type Query { a: String }',
+      dataSources: [new SharedDS('one')]
+    });
+    const comp2 = new GraphQLComponent({
+      name: 'CompTwo',
+      types: 'type Query { b: String }',
+      dataSources: [new SharedDS('two')]
+    });
+
+    const parent = new GraphQLComponent({
+      name: 'Parent',
+      types: 'type Query { p: String }',
+      imports: [comp1, comp2]
+    });
+
+    const warn = sinon.stub(console, 'warn');
+    const ctx = await parent.context({});
+    assert.equal(ctx.dataSources.shared.getTag(), 'one', 'first sibling data source wins at runtime');
+    assert.equal(warn.callCount, 0, 'no runtime warnings when sibling imports share a data source class');
+    warn.restore();
+    assert.end();
+  });
+
   t.test('sibling imports with different data source implementations throw without override', (assert) => {
     class DsA {
       name = 'users';

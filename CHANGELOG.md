@@ -1,7 +1,7 @@
 ### v7.0.0
 
 - [BREAKING] Context pipeline order: middleware and namespace run before import data sources are merged. This component’s data source proxies are available in middleware (local data sources only, not imports) and read context updated after each middleware step, namespace, and import merge; resolvers receive the finished context including import data sources.
-- [BREAKING] Import precedence: parent top-level context keys and data source keys win over imports. Sibling imports that reuse the same data source **constructor** for the same key are deduped silently (first import wins at runtime). Sibling imports with the same key but **different** implementations throw at construction unless the parent sets `dataSourceOverrides` for that key.
+- [BREAKING] Import precedence: parent top-level context keys and data source keys win over imports. Sibling imports that reuse the same data source **constructor** for the same key are deduped silently at construction and runtime (first import wins). Sibling or **cousin** imports (including nested imports) with the same key but **different** implementations throw at construction unless the parent sets `dataSourceOverrides` for that key. Runtime data source merging is silent; collisions are resolved at construction time.
 - [BREAKING] Namespace context is assigned as a fresh object per request under the configured namespace key, avoiding in-place mutation races between parallel imports.
 - [FIX] Removed duplicate per-request injection of imported data sources (import data sources are merged only via each import’s context function).
 - [FIX] Schema `transforms` mappers of the same kind now chain, with each mapper receiving the previous mapper’s result.
