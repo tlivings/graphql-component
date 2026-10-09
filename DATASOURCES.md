@@ -475,6 +475,22 @@ declare module 'graphql-component' {
 
 ## Context System
 
+### Composition order and precedence (v7+)
+
+When components import other components, context is assembled predictably on every request:
+
+1. **Incoming context** — for an imported component, this already reflects the importing (parent) component’s middleware.
+2. **Middleware** — registered with `component.context.use()`, in order.
+3. **Namespace** — `context.factory` output is stored under `context.namespace` as a new object (not merged onto a shared reference).
+4. **Imports** — imported components resolve in parallel; their namespace keys remain nested (`context.child`, etc.).
+5. **Data sources** — proxies are created once from the finished context (after middleware and namespace), so data source methods see auth, config, and other middleware values.
+
+**Precedence:** top-level keys on the importing component win over the same keys from imports. Namespace keys do not flatten, so parallel imports cannot overwrite each other’s namespace objects. Data source keys on the parent win over imports unless the parent sets `dataSourceOverrides` to replace an import intentionally. Sibling imports with the same key and the same data source constructor are deduped silently (first import wins); different implementations for the same key throw at construction unless the parent provides `dataSourceOverrides`.
+
+**Middleware data sources:** during middleware, `context.dataSources` includes only this component’s own data sources (not imported components’). Proxies stay stable for the request and read context accumulated so far (through prior middleware steps, namespace, and merged imports). Import data sources are merged onto the finished context after imports resolve.
+
+**Sibling imports:** a data source cannot reach another import’s data sources through `context.dataSources` inside its methods; compose in resolvers on the parent context instead.
+
 ### Context Structure
 
 The context passed to data sources includes:

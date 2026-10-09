@@ -145,7 +145,17 @@ component.context.use('logging', async (context) => {
 });
 ```
 
-Middleware runs in registration order, and each step receives the output of the previous one. The full context flow is: data source injection, import data source injection, middleware, import context resolution (parallel), then namespace application.
+Middleware runs in registration order, and each step receives the output of the previous one.
+
+Per component, context is built in this order:
+
+1. Start from the incoming context (for imports, this already includes the parent’s middleware output).
+2. Run this component’s middleware.
+3. Apply this component’s namespace context under its `context.namespace` key (a fresh object each request).
+4. Resolve imported components’ contexts in parallel and merge them (parent top-level keys win; namespace keys stay nested and do not collide).
+5. Attach this component’s data source proxies (stable for the request, reading context via a live ref) before middleware so middleware can call local data sources; refresh the ref after middleware, namespace, and import merges. Import data sources are merged last on the returned context.
+
+When a parent imports a child, the child’s middleware runs after the parent’s middleware on the same request. Middleware on each component only sees that component’s own data sources (import data sources are merged afterward). Data source key collisions between a parent and an import warn at construction unless the parent uses `dataSourceOverrides`; at runtime the parent’s data sources win. Sibling imports with the same key and same data source class are deduped silently; different implementations throw at construction unless the parent provides `dataSourceOverrides`.
 
 Components can namespace their context contribution:
 
@@ -232,6 +242,7 @@ const component = new GraphQLComponent({
 | Option | Type | Description |
 |---|---|---|
 | `types` | `string \| string[]` | GraphQL SDL type definitions |
+| `name` | `string` | Stable component name (recommended in minified bundles; defaults to `constructor.name`) |
 | `resolvers` | `object` | Resolver map. Query resolvers are memoized per-request; mutations and subscriptions are not. |
 | `imports` | `Array<Component \| ConfigObject>` | Child components to stitch into this schema |
 | `context` | `{ namespace, factory }` | Context namespace and factory function |
@@ -247,7 +258,7 @@ const component = new GraphQLComponent({
 
 | Property | Type | Description |
 |---|---|---|
-| `name` | `string` | Component name (derived from class name) |
+| `name` | `string` | Component name (`name` option or class name) |
 | `schema` | `GraphQLSchema` | The constructed, cached schema |
 | `context` | `IContextWrapper` | Context function with `.use()` for middleware |
 | `types` | `TypeSource` | The component's type definitions |

@@ -71,6 +71,37 @@ test('GraphQLComponent Context Tests', (t) => {
     assert.end();
   });
 
+  t.test('data sources see middleware output on finished context', async (assert) => {
+    class TestDataSource {
+      name = 'TestDataSource';
+      
+      getData(context: any, id: string) {
+        return { id, fromDataSource: true, userId: context.userId };
+      }
+    }
+
+    const component = new GraphQLComponent({
+      types: `type Query { test: String }`,
+      dataSources: [new TestDataSource()]
+    });
+
+    const contextFn = component.context;
+    contextFn.use('dataSourceTest', async (ctx) => ({
+      ...ctx,
+      userId: 'mw-user',
+      middlewareRan: true
+    }));
+
+    const context = await contextFn({});
+    
+    assert.deepEqual(
+      context.dataSources.TestDataSource.getData('1'),
+      { id: '1', fromDataSource: true, userId: 'mw-user' },
+      'data source sees middleware output'
+    );
+    assert.end();
+  });
+
   t.test('should preserve imported dataSources in context', async (assert) => {
     class ImportedDataSource {
       name = 'ImportedDataSource';
